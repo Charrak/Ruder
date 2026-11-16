@@ -45,6 +45,18 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 | `cd firmware && make test` | Firmware-Logik auf dem Rechner testen |
 | `cd firmware && make check-syntax` | `main.cpp` gegen Arduino-Stubs prüfen |
 | `cd firmware/ruder_sensor && pio run -t upload` | Firmware selbst bauen und flashen |
+| `python3 tools/check-workflow.py` | CI-Workflow vorab prüfen (Action-Versionen, Job-IDs) |
+
+Für ein **Model C mit PM3** liegt eine vorbereitete Vorlage bereit:
+
+```bash
+cd firmware/ruder_sensor
+cp include/config.model-c-pm3.h include/config.h   # dann Passwörter eintragen
+```
+
+Das PM3 bleibt dabei am Gerät und wird nicht angefasst; der Sensor kommt als
+zweite Quelle an den Rahmen. Details und das Einmessen der Strecke gegen das
+PM3 stehen in [docs/inbetriebnahme.md](docs/inbetriebnahme.md).
 
 ## Was es kann
 
@@ -101,6 +113,7 @@ src/
 firmware/ruder_sensor/  ESP32-Firmware (PlatformIO)
 firmware/test/          Host-Test der Impulsverarbeitung
 firmware/stubs/         Arduino-Stubs für die Syntaxprüfung ohne Toolchain
+tools/check-workflow.py CI-Workflow vorab prüfen
 .github/workflows/      CI: Firmware bauen, .bin als Artefakt, Release bei Tags
 tools/device-emulator.mjs  Sensor ohne Hardware simulieren
 docs/                   Protokoll, Hardware, Inbetriebnahme

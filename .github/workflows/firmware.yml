@@ -52,7 +52,7 @@ jobs:
   # der Firmware gegen Arduino-Stubs. Läuft in Sekunden und fängt die
   # meisten Fehler ab, bevor die Toolchain überhaupt startet.
   # ---------------------------------------------------------------------
-  prüfen:
+  preflight:
     name: Host-Tests und Syntax
     runs-on: ubuntu-24.04
     steps:
@@ -72,9 +72,9 @@ jobs:
   # ---------------------------------------------------------------------
   # Der eigentliche Build. Läuft erst, wenn die Vorprüfung grün ist.
   # ---------------------------------------------------------------------
-  bauen:
+  build:
     name: .bin bauen
-    needs: prüfen
+    needs: preflight
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -262,9 +262,9 @@ jobs:
   # Veröffentlichen: bei einem Tag (v1.2.3) oder manuellem Lauf mit
   # "release" werden die Dateien an ein GitHub-Release gehängt.
   # ---------------------------------------------------------------------
-  veröffentlichen:
+  release:
     name: Release
-    needs: bauen
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release
     runs-on: ubuntu-24.04
     steps:

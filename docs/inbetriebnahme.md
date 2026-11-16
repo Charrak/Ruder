@@ -19,6 +19,37 @@ Sonst misst man den Fahrer, nicht das Gerät.
 
 Verdrahtung und Alternativen (Reed, Lichtschranke): [hardware.md](hardware.md).
 
+### Das PM3 bleibt am Gerät
+
+Das PM3 wird **nicht** ausgebaut und **nicht** elektrisch angefasst. Es
+zeigt weiter Split, Schlagzahl und Kalorien an – der ESP32 ist eine zweite
+Quelle, keine Ersatzschaltung. Das hat zwei Vorteile: Wer ohne Dashboard
+rudert, sieht trotzdem seine Werte, und ein Ausfall des Sensors kostet
+nicht das ganze Training.
+
+Das PM3 taugt außerdem als Referenz zum Einmessen:
+
+| Anzeige | Vergleich | Was daraus folgt |
+| --- | --- | --- |
+| Strecke | 1.000 m laut PM3 vs. Dashboard | Streckenfaktor nachziehen, siehe unten |
+| Split | gleiche Einheit auf beiden | weicht er konstant ab: Drag-Faktor im Dashboard |
+| Schlagzahl | muss übereinstimmen | weicht sie ab: Magnete/Entprellung prüfen |
+
+Die Watt-Anzeige des PM3 ist eine **Ableitung** aus der Bremsleistung, keine
+Messung. Kleine Unterschiede zum Dashboard sind normal und kein Fehler.
+
+**Strecke einmessen** (die einzige Stellschraube, wenn die Meter nicht
+passen): `DISTANCE_PER_REV` in `src/core/engine.ts` ist mit 2,5 m ein
+Community-Richtwert, nicht von Concept2 bestätigt.
+
+```
+DISTANCE_PER_REV = 2,5 * (PM3-Meter / Dashboard-Meter)
+```
+
+Beispiel: PM3 zeigt 1.000 m, das Dashboard 980 m → `2,5 * 1000/980 = 2,551`.
+Danach den Split gegen das PM3 prüfen. Die Leistung hängt an der
+Winkelgeschwindigkeit und ändert sich dadurch nicht.
+
 ## 2. Firmware aufs Board bringen
 
 Es gibt zwei Wege. Wer nur das Board flashen will, nimmt **A** und braucht
@@ -70,12 +101,21 @@ Für eigene Anpassungen (Pins, Entprellzeit, fest eingetragene Zugangsdaten):
 
 ```bash
 cd firmware/ruder_sensor
-cp include/config.example.h include/config.h
-# config.h öffnen: WLAN-Name, Passwort, ggf. SENSOR_PIN anpassen
+
+# Model C mit PM3: vorbereitete Vorlage nehmen
+cp include/config.model-c-pm3.h include/config.h
+# oder für ein anderes Gerät:
+# cp include/config.example.h include/config.h
+
+# config.h öffnen: WLAN-Name, Passwort, OTA-Passwort anpassen
 
 pio run -t upload
 pio device monitor
 ```
+
+`config.h` ist gitignored – Passwörter landen nicht im Repository. Die
+Vorlage `config.model-c-pm3.h` enthält die Erklärungen zu jedem Wert
+(warum 3 ms Entprellung, warum feste IP, wo der Sensor sitzt).
 
 Der Einrichtungsmodus entfällt, wenn `WIFI_SSID` in `config.h` gesetzt ist.
 Eine im Browser gespeicherte Zugangsdaten-Kombination hat trotzdem Vorrang –
