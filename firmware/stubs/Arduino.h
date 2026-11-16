@@ -67,7 +67,6 @@ void delayMicroseconds(unsigned int us);
 void ESP_restart();
 struct EspClass { void restart(); };
 extern EspClass ESP;
-int esp_reset_reason();
 
 struct SerialStub {
   void begin(unsigned long) {}
@@ -80,7 +79,6 @@ struct SerialStub {
 };
 extern SerialStub Serial;
 
-uint32_t esp_random();
 
 #define IRAM_ATTR
 typedef uint32_t portMUX_TYPE;

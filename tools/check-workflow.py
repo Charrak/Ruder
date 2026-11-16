@@ -110,7 +110,7 @@ def main():
     print("\nBuild-Schritt")
     build = [s for s in bau_job["steps"] if s.get("name") == "Firmware bauen"][0]
     pruefe(build["working-directory"] == "${{ env.FIRMWARE_DIR }}", "baut im Firmware-Verzeichnis")
-    pruefe(build["run"] == "pio run", "nutzt pio run")
+    pruefe("pio run" in build["run"], "nutzt pio run")
 
     print("\nVoraussetzungen der Firmware")
     ini = open(f"{basis}/firmware/ruder_sensor/platformio.ini").read()

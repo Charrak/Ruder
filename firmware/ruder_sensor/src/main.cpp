@@ -27,7 +27,11 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include <esp_timer.h>
+#include <esp_random.h>       // esp_random()
+#include <esp_system.h>       // esp_reset_reason()
+#include <esp_timer.h>        // esp_timer_get_time()
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Lokale Zugangsdaten (nicht im Repository). Fehlt die Datei – etwa im
 // CI-Build – greifen die Standardwerte direkt in der Firmware, sodass ohne
