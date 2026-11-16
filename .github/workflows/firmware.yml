@@ -136,7 +136,14 @@ jobs:
 
       - name: Erzeugte Dateien auflisten
         if: success()
-        run: ls -la "${FIRMWARE_DIR}/.pio/build/esp32dev/"
+        run: |
+          ls -la "${FIRMWARE_DIR}/.pio/build/esp32dev/"
+          {
+            echo "Erzeugte Dateien:"
+            echo '```'
+            ls -la "${FIRMWARE_DIR}/.pio/build/esp32dev/"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Flaschanleitung erzeugen
         if: success()
