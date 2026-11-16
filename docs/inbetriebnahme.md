@@ -174,7 +174,40 @@ Diagnoseseite im Browser öffnen: `http://ruder-sensor.local/` oder
 Steigt „Impulse gesamt" nicht, obwohl gedreht wird: Abstand zum Magneten
 prüfen, Polarität des Magneten umdrehen, Pull-up kontrollieren.
 
-## 4. Dashboard verbinden
+## 4. Dashboard aufs Tablet bringen
+
+Das Dashboard ist eine Webseite. Sie muss irgendwo liegen, wo das Tablet sie
+per WLAN erreicht — drei Wege, alle ohne Cloud:
+
+| Weg | Adresse am Tablet | Wofür |
+| --- | --- | --- |
+| **Laptop im Studio** | `http://<laptop-ip>:4173` | der schnellste Weg, Laptop bleibt an |
+| **Einmal gebaut, irgendwo ausgeliefert** | `http://<server-ip>` | Dauerbetrieb, z. B. auf dem Studio-NAS |
+| **Auf dem ESP32 selbst** | `http://ruder-sensor.local/` | nur die Diagnoseseite — die volle Anzeige passt nicht in den Flash |
+
+**Weg 1 – Laptop im Studio (empfohlen zum Start):**
+
+```bash
+npm install
+npm run build      # Typprüfung + Build nach dist/
+npm run preview    # liefert dist/ aus, im ganzen WLAN erreichbar
+```
+
+`npm run preview` zeigt beim Start die Adresse an, z. B.
+`http://192.168.1.20:4173`. Diese Adresse auf dem Tablet eintippen, fertig.
+Der Laptop darf danach nicht in den Ruhezustand (Netzteil anschließen).
+
+**Weg 2 – fester Platz im Netz:** den Inhalt von `dist/` auf einen
+Webserver im Studio kopieren (jeder beliebige Webserver, keine
+Sonderbehandlung nötig — es sind nur statische Dateien). Wichtig: die Seite
+muss über **`http`** ausgeliefert werden, nicht `https`, sonst blockiert der
+Browser die unverschlüsselte Sensor-Verbindung.
+
+> Der Sensor läuft bewusst auf `ws://`. Deshalb Dashboard und Sensor im
+> selben Netz über `http` betreiben — oder beides hinter einen Reverse-Proxy
+> mit TLS legen. Gemischt (`https`-Seite, `ws`-Sensor) blockiert Chrome.
+
+## 5. Dashboard verbinden
 
 Auf dem Studio-Tablet (Chrome oder Edge):
 
@@ -188,7 +221,7 @@ Auf dem Studio-Tablet (Chrome oder Edge):
 Die Einstellung wird im Browser gespeichert. Nach einem Neustart des
 Tablets verbindet das Dashboard von allein.
 
-## 5. Kiosk-Betrieb einrichten
+## 6. Kiosk-Betrieb einrichten
 
 Die Anzeige soll von selbst starten und niemanden bedienen müssen.
 
@@ -218,7 +251,7 @@ nicht eingebaut, weil es auf älteren Tablets unzuverlässig ist).
 `F` schaltet Vollbild. Mit angeschlossener Tastatur lässt sich das
 Dashboard ohne Anfassen bedienen.
 
-## 6. Täglicher Betrieb
+## 7. Täglicher Betrieb
 
 1. Dashboard ist im Kiosk-Modus – man muss nichts tun.
 2. Trainierender drückt **Start** (oder Leertaste), rudert los.
@@ -231,7 +264,7 @@ Demo-Sensor weiter – **die Zahlen sind dann nicht echt**. Das ist Absicht
 (eine tote Anzeige ist schlimmer), aber es muss sichtbar bleiben: die
 Pille ist dann rot und die Meldung nennt den Grund.
 
-## 7. Wenn etwas nicht geht
+## 8. Wenn etwas nicht geht
 
 | Symptom | Ursache | Abhilfe |
 | --- | --- | --- |

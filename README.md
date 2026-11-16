@@ -40,12 +40,13 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 | `npm run dev` | Entwicklungsserver, im ganzen WLAN erreichbar |
 | `npm run build` | Typprüfung + Produktions-Build nach `dist/` |
 | `npm run preview` | gebauten Stand ausliefern |
-| `npm test` | 70 Tests (Physik, Protokoll, Wiederverbinden, UI, Integration) |
+| `npm test` | 72 Tests (Physik, Protokoll, Wiederverbinden, UI, Integration) |
 | `npm run emulator` | ESP32-Sensor simulieren |
 | `cd firmware && make test` | Firmware-Logik auf dem Rechner testen |
 | `cd firmware && make check-syntax` | `main.cpp` gegen Arduino-Stubs prüfen |
 | `cd firmware/ruder_sensor && pio run -t upload` | Firmware selbst bauen und flashen |
 | `python3 tools/check-workflow.py` | CI-Workflow vorab prüfen (Action-Versionen, Job-IDs) |
+| `tools/check-all.sh` | **Vollständigkeitsprüfung**: Dateien, Typen, Tests, Firmware, CI in einem Lauf |
 
 Für ein **Model C mit PM3** liegt eine vorbereitete Vorlage bereit:
 
@@ -132,10 +133,23 @@ bei wechselnder Drehzahl exakt, im Gegensatz zum Mittelwert der Abstände.
 Ein Schlag beginnt dort, wo der Impulsabstand sein Minimum hat: höchste
 Drehzahl des Schwungrads, also das Ende des Durchzugs.
 
+## Ist alles da?
+
+```bash
+tools/check-all.sh          # Dateien, Typen, Tests, Firmware, CI
+tools/check-all.sh --build  # zusätzlich den Produktions-Build neu erzeugen
+```
+
+Das Skript prüft die Pflichtdateien, die Streuner (Stub-Header, die in der
+Wurzel statt unter `firmware/stubs/` liegen), ob `config.h` versehentlich
+mit Zugangsdaten eingecheckt wurde, und lässt Typprüfung, Tests, Build,
+Firmware-Prüfung und CI-Check laufen. Exit 0 heißt: nichts fehlt.
+
 ## Dokumentation
 
-- [docs/inbetriebnahme.md](docs/inbetriebnahme.md) – von der Montage bis
-  zum Kiosk-Tablet, inklusive Fehlersuche.
+- [docs/inbetriebnahme.md](docs/inbetriebnahme.md) – von der Montage über
+  das Ausliefern der Seite ans Tablet bis zum Kiosk-Betrieb, inklusive
+  Fehlersuche.
 - [docs/hardware.md](docs/hardware.md) – Sensorvarianten, Verdrahtung,
   Drag-Faktor-Tabelle.
 - [docs/protocol.md](docs/protocol.md) – Zeilenformat zwischen Sensor und
@@ -145,10 +159,13 @@ Drehzahl des Schwungrads, also das Ende des Durchzugs.
 
 - **Web Serial und Web Bluetooth** brauchen Chrome oder Edge am Desktop und
   eine sichere Herkunft. Auf dem iPad läuft nur der WLAN-Weg.
-- **Die Firmware ist hier nicht kompiliert** (die ESP32-Toolchain ließ sich
-  in der Entwicklungsumgebung nicht laden). Die Impulsverarbeitung ist als
-  Host-Test abgedeckt (`cd firmware && make test`), der Rest ist sorgfältig
-  geschrieben, aber vor dem ersten Einsatz einmal `pio run` laufen lassen.
+- **Die Firmware wird in der CI kompiliert**, nicht auf jedem Rechner: die
+  ESP32-Toolchain lädt nur dort. Ein grüner Lauf auf `main` heißt, dass
+  `pio run` für `esp32dev` durchläuft und eine flashbare `.bin` entsteht
+  (rund 580 kB). Lokal prüfbar sind die Impulsverarbeitung
+  (`cd firmware && make test`) und die Syntax von `main.cpp` gegen die
+  Arduino-Stubs in der Toolchain-Sprache gnu++11
+  (`cd firmware && make check-syntax`).
 - **Kein TLS am Sensor.** Ein per `https` geladenes Dashboard darf keine
   `ws://`-Verbindung öffnen – das ist eine Browser-Regel. Für den
   Studiobetrieb deshalb über `http://` im lokalen Netz ausliefern.
