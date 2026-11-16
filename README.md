@@ -76,7 +76,8 @@ PM3 stehen in [docs/inbetriebnahme.md](docs/inbetriebnahme.md).
 
 Die CI baut bei jedem Lauf auf `main` und bei jedem Tag `v*` flashfertige
 Dateien — **Actions → Firmware ESP32 → Artifacts**. Bei Tags landen sie
-zusätzlich in einem Release. Im Paket:
+zusätzlich in einem Release. Aus PR-Läufen gibt es keine Artefakte; dort
+baut die CI nur zur Kontrolle. Im Paket:
 
 | Datei | Adresse |
 | --- | --- |

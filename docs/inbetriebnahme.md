@@ -63,6 +63,14 @@ Die CI baut bei jedem Tag und jedem Lauf auf `main` fertige Dateien:
   `ruder-sensor-esp32dev`**
 - oder direkt am **Release** (bei Tags `v*`)
 
+Artefakte entstehen nur bei Läufen, die **nicht** von einem Pull Request
+kommen (also auf `main` oder per „Run workflow“). Bei einem PR-Lauf steht in
+der Zusammenfassung nur die Dateiliste — das ist normal, die Dateien selbst
+gibt es dort bewusst nicht.
+
+Wenn kein passender Lauf da ist: **Actions → Firmware ESP32 → Run workflow →
+Branch `main` → Run**. Nach etwa zwei Minuten hängt das Paket am Lauf.
+
 Im Paket liegen die `.bin`-Dateien, `flashen.sh`, `flashen.bat`,
 `LIESMICH.txt` und `SHA256SUMS.txt`.
 
