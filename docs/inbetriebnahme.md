@@ -19,7 +19,54 @@ Sonst misst man den Fahrer, nicht das Gerät.
 
 Verdrahtung und Alternativen (Reed, Lichtschranke): [hardware.md](hardware.md).
 
-## 2. Firmware flashen
+## 2. Firmware aufs Board bringen
+
+Es gibt zwei Wege. Wer nur das Board flashen will, nimmt **A** und braucht
+keine Entwicklungsumgebung.
+
+### A) Fertige .bin flashen (empfohlen)
+
+Die CI baut bei jedem Tag und jedem Lauf auf `main` fertige Dateien:
+
+- **Actions → Firmware ESP32 → letzter grüner Lauf → Artifacts →
+  `ruder-sensor-esp32dev`**
+- oder direkt am **Release** (bei Tags `v*`)
+
+Im Paket liegen die `.bin`-Dateien, `flashen.sh`, `flashen.bat`,
+`LIESMICH.txt` und `SHA256SUMS.txt`.
+
+```bash
+pip install esptool
+./flashen.sh /dev/ttyUSB0      # Linux/macOS
+flashen.bat COM3               # Windows
+```
+
+Die Skripte setzen die richtigen Adressen (`0x1000` Bootloader, `0x8000`
+Partitionen, `0xe000` boot_app0, `0x10000` Anwendung). Wer es selbst tippt:
+
+```bash
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 460800 \
+  write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect \
+  0x1000  ruder-sensor-esp32dev-bootloader.bin \
+  0x8000  ruder-sensor-esp32dev-partitions.bin \
+  0xe000  ruder-sensor-esp32dev-boot_app0.bin \
+  0x10000 ruder-sensor-esp32dev.bin
+```
+
+**Erste Einrichtung direkt nach dem Flashen:**
+
+1. Das Board öffnet das WLAN **`ruder-sensor-setup`** (kein Passwort).
+2. Damit verbinden, im Browser **`http://192.168.4.1/`** aufrufen.
+3. Studio-WLAN (2,4 GHz) und Passwort eintragen, speichern.
+4. Das Gerät startet neu und ist als `http://ruder-sensor.local/` erreichbar.
+
+Die Zugangsdaten liegen im NVS des ESP32 und bleiben bei späteren
+Firmware-Updates erhalten. Deshalb enthalten die Release-Dateien bewusst
+**kein** WLAN – sonst müsste für jedes Studio eine eigene .bin gebaut werden.
+
+### B) Selbst bauen und flashen
+
+Für eigene Anpassungen (Pins, Entprellzeit, fest eingetragene Zugangsdaten):
 
 ```bash
 cd firmware/ruder_sensor
@@ -30,6 +77,10 @@ pio run -t upload
 pio device monitor
 ```
 
+Der Einrichtungsmodus entfällt, wenn `WIFI_SSID` in `config.h` gesetzt ist.
+Eine im Browser gespeicherte Zugangsdaten-Kombination hat trotzdem Vorrang –
+so lässt sich ein Gerät im Feld umziehen, ohne neu zu flashen.
+
 Nach dem Start erscheint im Monitor:
 
 ```
@@ -39,8 +90,26 @@ Nach dem Start erscheint im Monitor:
 # WebSocket bereit auf Port 81
 ```
 
-Kommt statt dessen `WLAN nicht erreichbar`: SSID/Passwort prüfen und
-sicherstellen, dass es ein **2,4-GHz-Netz** ist – der ESP32 kann kein 5 GHz.
+Ohne Zugangsdaten steht dort stattdessen:
+
+```
+# ===== EINRICHTUNGSMODUS =====
+# WLAN "ruder-sensor-setup" öffnen (kein Passwort)
+# Danach http://192.168.4.1/ aufrufen
+# =============================
+```
+
+Findet das Gerät ein bekanntes Netz nicht (WLAN umbenannt, Passwort
+geändert), startet es ebenfalls im Einrichtungsmodus – statt in einer
+Neustartschleife zu hängen.
+
+!!! warning "Nur 2,4 GHz"
+    Der ESP32 kann kein 5-GHz-Netz. Wenn das Studio-WLAN auf 5 GHz läuft,
+    im Router ein 2,4-GHz-Netz für die Geräte einschalten.
+
+Wenn der Upload scheitert: USB-Kabel (muss Daten übertragen, nicht nur
+laden), Treiber (CP2102/CH340) und Port prüfen. Beim ESP32-DevKit oft
+`/dev/ttyUSB0` (Linux), `COM3` (Windows), `/dev/cu.usbserial-*` (macOS).
 
 ## 3. Sensor prüfen, bevor das Dashboard kommt
 

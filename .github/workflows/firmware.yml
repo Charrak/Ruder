@@ -1,0 +1,306 @@
+name: Firmware ESP32
+
+# Baut aus der Firmware fertige .bin-Dateien zum Flashen.
+#
+#   Pull Request  -> nur prüfen, keine Artefakte
+#   Push auf main -> .bin als Artefakt (30 Tage abrufbar)
+#   Tag v*        -> zusätzlich ein GitHub-Release mit den Dateien
+#   manuell       -> beides wählbar (Actions -> "Run workflow")
+#
+# Die Dateien landen im Release unter:
+#   ruder-sensor-esp32dev.bin            Komplettabbild für 0x0
+#   ruder-sensor-esp32dev-bootloader.bin für 0x1000
+#   ruder-sensor-esp32dev-partitions.bin für 0x8000
+#   ruder-sensor-esp32dev-boot_app0.bin  für 0xe000
+#   flashen.sh / flashen.bat             fertige Befehle mit korrekten Adressen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Als Release veröffentlichen (nur bei Tag sinnvoll)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # PlatformIO-Core-Version festnageln: ein unerwartetes Update soll nicht
+  # stillschweigend andere Binaries erzeugen.
+  PLATFORMIO_CORE_VERSION: '6.1.18'
+  FIRMWARE_DIR: firmware/ruder_sensor
+  ARTIFACT_NAME: ruder-sensor-esp32dev
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Schnelle Vorprüfung: Host-Tests der Impulsverarbeitung und Syntaxcheck
+  # der Firmware gegen Arduino-Stubs. Läuft in Sekunden und fängt die
+  # meisten Fehler ab, bevor die Toolchain überhaupt startet.
+  # ---------------------------------------------------------------------
+  prüfen:
+    name: Host-Tests und Syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compiler bereitstellen
+        run: g++ --version
+
+      - name: Impulsverarbeitung testen
+        working-directory: firmware
+        run: make test
+
+      - name: Firmware syntaktisch prüfen
+        working-directory: firmware
+        run: make check-syntax
+
+  # ---------------------------------------------------------------------
+  # Der eigentliche Build. Läuft erst, wenn die Vorprüfung grün ist.
+  # ---------------------------------------------------------------------
+  bauen:
+    name: .bin bauen
+    needs: prüfen
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Python bereitstellen
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: PlatformIO installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install "platformio==${PLATFORMIO_CORE_VERSION}"
+          pio --version
+
+      # Der PlatformIO-Cache spart bei jedem Lauf mehrere Minuten, weil
+      # Toolchain und Bibliotheken sonst erneut geladen werden.
+      - name: PlatformIO-Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          # platformio.ini allein ändert sich selten; das Lockfile von
+          # PlatformIO erfasst auch die aufgelösten Bibliotheksversionen.
+          key: pio-${{ runner.os }}-${{ env.PLATFORMIO_CORE_VERSION }}-${{ hashFiles('firmware/ruder_sensor/platformio.ini', 'firmware/ruder_sensor/package.lock') }}
+          restore-keys: |
+            pio-${{ runner.os }}-${{ env.PLATFORMIO_CORE_VERSION }}-
+
+      - name: Firmware bauen
+        working-directory: ${{ env.FIRMWARE_DIR }}
+        run: pio run
+
+      - name: Erzeugte Dateien auflisten
+        run: ls -la "${FIRMWARE_DIR}/.pio/build/esp32dev/"
+
+      - name: Flaschanleitung erzeugen
+        run: |
+          BILD=".pio/build/esp32dev"
+          BEKANNT="${FIRMWARE_DIR}/${BILD}"
+          AUSGABE="ausgabe"
+          mkdir -p "$AUSGABE"
+
+          cp "${BEKANNT}/firmware.bin"      "${AUSGABE}/ruder-sensor-esp32dev.bin"
+          cp "${BEKANNT}/bootloader.bin"    "${AUSGABE}/ruder-sensor-esp32dev-bootloader.bin"
+          cp "${BEKANNT}/partitions.bin"    "${AUSGABE}/ruder-sensor-esp32dev-partitions.bin"
+          if [ -f "${BEKANNT}/boot_app0.bin" ]; then
+            cp "${BEKANNT}/boot_app0.bin"   "${AUSGABE}/ruder-sensor-esp32dev-boot_app0.bin"
+          fi
+
+          cat > "${AUSGABE}/flashen.sh" <<'EOF'
+          #!/usr/bin/env bash
+          # Ruder-Sensor flashen. Aufruf: ./flashen.sh /dev/ttyUSB0
+          set -euo pipefail
+          PORT="${1:-/dev/ttyUSB0}"
+          HIER="$(cd "$(dirname "$0")" && pwd)"
+
+          if ! command -v esptool.py >/dev/null 2>&1 && ! command -v esptool >/dev/null 2>&1; then
+            echo "esptool fehlt. Installation: pip install esptool" >&2
+            exit 1
+          fi
+          ESPTOOL="$(command -v esptool.py || command -v esptool)"
+
+          "$ESPTOOL" --chip esp32 --port "$PORT" --baud 460800 \
+            --before default_reset --after hard_reset write_flash -z \
+            --flash_mode dio --flash_freq 40m --flash_size detect \
+            0x1000  "$HIER/ruder-sensor-esp32dev-bootloader.bin" \
+            0x8000  "$HIER/ruder-sensor-esp32dev-partitions.bin" \
+            0xe000  "$HIER/ruder-sensor-esp32dev-boot_app0.bin" \
+            0x10000 "$HIER/ruder-sensor-esp32dev.bin"
+
+          echo
+          echo "Fertig. Nach dem Neustart: WLAN \"ruder-sensor-setup\" öffnen"
+          echo "und http://192.168.4.1/ aufrufen."
+          EOF
+          chmod +x "${AUSGABE}/flashen.sh"
+
+          # Windows-Variante mit CRLF, damit die Batchdatei läuft
+          cat > "${AUSGABE}/flashen.bat" <<'EOF'
+          @echo off
+          REM Ruder-Sensor flashen. Aufruf: flashen.bat COM3
+          setlocal
+          set PORT=%1
+          if "%PORT%"=="" set PORT=COM3
+          set HIER=%~dp0
+
+          where esptool.py >nul 2>&1
+          if errorlevel 1 (
+            echo esptool fehlt. Installation: pip install esptool
+            exit /b 1
+          )
+
+          esptool.py --chip esp32 --port %PORT% --baud 460800 ^
+            --before default_reset --after hard_reset write_flash -z ^
+            --flash_mode dio --flash_freq 40m --flash_size detect ^
+            0x1000  "%HIER%ruder-sensor-esp32dev-bootloader.bin" ^
+            0x8000  "%HIER%ruder-sensor-esp32dev-partitions.bin" ^
+            0xe000  "%HIER%ruder-sensor-esp32dev-boot_app0.bin" ^
+            0x10000 "%HIER%ruder-sensor-esp32dev.bin"
+
+          echo.
+          echo Fertig. WLAN "ruder-sensor-setup" oeffnen, dann http://192.168.4.1/
+          endlocal
+          EOF
+          # CRLF für Windows
+          sed -i 's/$/\r/' "${AUSGABE}/flashen.bat"
+
+          cat > "${AUSGABE}/LIESMICH.txt" <<'EOF'
+          Ruder-Sensor – ESP32 (esp32dev)
+          =================================
+
+          Enthalten:
+            ruder-sensor-esp32dev.bin              Komplettabbild, Adresse 0x10000
+            ruder-sensor-esp32dev-bootloader.bin   Bootloader,   Adresse 0x1000
+            ruder-sensor-esp32dev-partitions.bin   Partitionen,  Adresse 0x8000
+            ruder-sensor-esp32dev-boot_app0.bin    boot_app0,    Adresse 0xe000
+            flashen.sh / flashen.bat               fertige Befehle
+
+          Flashen (Linux/macOS):
+            pip install esptool
+            ./flashen.sh /dev/ttyUSB0
+
+          Flashen (Windows):
+            pip install esptool
+            flashen.bat COM3
+
+          Nur das Anwendungsabbild aktualisieren (ohne Bootloader):
+            esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x10000 ruder-sensor-esp32dev.bin
+
+          Erste Einrichtung:
+            1. Nach dem Flashen öffnet das Gerät das WLAN "ruder-sensor-setup".
+            2. Damit verbinden, http://192.168.4.1/ aufrufen.
+            3. Studio-WLAN (2,4 GHz) und Passwort eingeben, speichern.
+            4. Gerät startet neu und ist als http://ruder-sensor.local/ erreichbar.
+
+          Danach im Dashboard unter Einstellungen "ruder-sensor.local" eintragen.
+
+          Achtung: Diese Dateien enthalten kein WLAN. Die Zugangsdaten werden
+          am Gerät gesetzt und bleiben bei Updates erhalten.
+          EOF
+
+          # Prüfsummen, damit sich ein Download verifizieren lässt
+          (cd "${AUSGABE}" && sha256sum *.bin > SHA256SUMS.txt)
+
+          echo "--- Inhalt ---"
+          ls -la "${AUSGABE}"
+          cat "${AUSGABE}/SHA256SUMS.txt"
+
+      - name: Artefakt hochladen
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ausgabe/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Zusammenfassung
+        if: always()
+        run: |
+          {
+            echo "## Firmware-Build"
+            echo
+            if [ -f ausgabe/SHA256SUMS.txt ]; then
+              echo "| Datei | Größe |"
+              echo "| --- | --- |"
+              for datei in ausgabe/*.bin; do
+                echo "| $(basename "$datei") | $(du -h "$datei" | cut -f1) |"
+              done
+              echo
+              echo "Flashen: \`./flashen.sh /dev/ttyUSB0\` bzw. \`flashen.bat COM3\`"
+              echo
+              echo "<details><summary>Prüfsummen</summary>"
+              echo
+              echo '```'
+              cat ausgabe/SHA256SUMS.txt
+              echo '```'
+              echo "</details>"
+            else
+              echo "Build fehlgeschlagen – siehe Protokoll oben."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------
+  # Veröffentlichen: bei einem Tag (v1.2.3) oder manuellem Lauf mit
+  # "release" werden die Dateien an ein GitHub-Release gehängt.
+  # ---------------------------------------------------------------------
+  veröffentlichen:
+    name: Release
+    needs: bauen
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ruder-sensor-esp32dev
+          path: ausgabe
+
+      - name: Release anlegen
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ausgabe/ruder-sensor-esp32dev.bin
+            ausgabe/ruder-sensor-esp32dev-bootloader.bin
+            ausgabe/ruder-sensor-esp32dev-partitions.bin
+            ausgabe/ruder-sensor-esp32dev-boot_app0.bin
+            ausgabe/flashen.sh
+            ausgabe/flashen.bat
+            ausgabe/LIESMICH.txt
+            ausgabe/SHA256SUMS.txt
+          generate_release_notes: true
+          body: |
+            Fertige Firmware für das ESP32-Dev-Board (esp32dev).
+
+            **Flashen**
+
+            ```bash
+            pip install esptool
+            ./flashen.sh /dev/ttyUSB0     # Linux/macOS
+            flashen.bat COM3              # Windows
+            ```
+
+            **Erste Einrichtung:** Nach dem Flashen öffnet das Gerät das WLAN
+            `ruder-sensor-setup`. Damit verbinden, `http://192.168.4.1/` aufrufen
+            und das Studio-WLAN eintragen. Danach ist das Gerät als
+            `http://ruder-sensor.local/` erreichbar.
+
+            Die Dateien enthalten bewusst **keine** WLAN-Zugangsdaten – die
+            werden am Gerät gesetzt und bleiben bei Updates erhalten.

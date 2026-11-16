@@ -1,15 +1,26 @@
 /**
- * Konfiguration – als include/config.h kopieren und anpassen.
+ * Konfiguration – optional.
+ *
+ * Ohne diese Datei baut die Firmware trotzdem und startet nach dem Flashen
+ * im Einrichtungsmodus: WLAN "ruder-sensor-setup" öffnen, dann
+ * http://192.168.4.1/ aufrufen. Die Zugangsdaten landen im NVS und bleiben
+ * bei Updates erhalten. Das ist der übliche Weg für die fertigen .bin-Dateien
+ * aus der CI.
+ *
+ * Wer die Zugangsdaten fest einkompilieren will (eigenes Gerät, Werkstatt):
  *
  *   cp include/config.example.h include/config.h
  *
  * config.h steht in .gitignore, damit Zugangsdaten nicht im Repository landen.
+ * Gespeicherte Zugangsdaten aus der Weboberfläche haben Vorrang vor diesen
+ * Werten – so lässt sich ein Gerät im Feld umziehen, ohne neu zu flashen.
  */
 #pragma once
 
 // ---------- WLAN ----------
-#define WIFI_SSID "VitalZentrum"
-#define WIFI_PASSWORD "geheim"
+// Leer lassen ("") = Einrichtungsmodus beim Start.
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
 
 // Optional: feste IP im Studio-WLAN (schnellerer Verbindungsaufbau,
 // stabilere Erreichbarkeit als DHCP). Sonst 0.0.0.0 eintragen.
