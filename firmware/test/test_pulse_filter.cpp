@@ -32,22 +32,22 @@ void testAcceptsCleanPulses() {
   uint32_t t = 1000;
   for (int i = 0; i < 6; i++) {
     check(filter.accept(t), "Impuls muss angenommen werden");
-    t += 333'333;
+    t += 333333;
   }
   check(filter.stats().accepted == 6, "6 angenommene Impulse");
   check(filter.pending() == 6, "6 Impulse im Puffer");
-  check(filter.stats().minPeriodUs == 333'333, "Abstand erkannt");
+  check(filter.stats().minPeriodUs == 333333, "Abstand erkannt");
 }
 
 void testRejectsBounce() {
   std::printf("Prellen\n");
   ruder::PulseFilter<16> filter;
-  filter.accept(10'000);
+  filter.accept(10000);
   // Prellen in den ersten 3 ms
-  check(!filter.accept(10'500), "0,5 ms später ist Prellen");
-  check(!filter.accept(12'900), "2,9 ms später ist Prellen");
+  check(!filter.accept(10500), "0,5 ms später ist Prellen");
+  check(!filter.accept(12900), "2,9 ms später ist Prellen");
   check(filter.stats().bounced == 2, "2 verworfene Prellimpulse");
-  check(filter.accept(13'100), "3,1 ms später ist echt");
+  check(filter.accept(13100), "3,1 ms später ist echt");
   check(filter.stats().accepted == 2, "nur echte Impulse zählen");
 }
 
@@ -93,7 +93,7 @@ void testMaxRate() {
   ruder::PulseFilter<16> filter;
   filter.accept(0);
   filter.accept(4000);   // 250 Hz
-  filter.accept(10'000); // 6 ms
+  filter.accept(10000); // 6 ms
   check(filter.maxRateHz() > 249.9F && filter.maxRateHz() < 250.1F, "250 Hz erkannt");
   check(filter.stats().maxPeriodUs == 6000, "längster Abstand erkannt");
 }

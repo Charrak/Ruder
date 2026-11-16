@@ -74,8 +74,14 @@ struct SerialStub {
   void print(const String &) {}
   void println() {}
   void println(const char *) {}
+  // Bis C++17 nachbilden, ohne Fold-Expression: sonst warnt der
+  // Syntaxcheck unter gnu++11 (Standard der ESP32-Toolchain).
   template <typename... A>
-  void printf(const char *fmt, A... args) { (void)fmt; ((void)args, ...); }
+  void printf(const char *fmt, A... args) {
+    (void)fmt;
+    int dummy[] = {0, (static_cast<void>(args), 0)...};
+    (void)dummy;
+  }
 };
 extern SerialStub Serial;
 
