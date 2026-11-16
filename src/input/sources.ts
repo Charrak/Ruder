@@ -4,15 +4,39 @@
  * Das Dashboard interessiert sich nur für Zeitstempel einzelner
  * Magnetimpulse. Woher sie kommen, ist austauschbar:
  *
- *  - DemoSensor:     Simulator, damit die Anzeige ohne Gerät läuft
- *  - SerialSensor:   ESP32 am USB-Port (Web Serial), Zeilen wie "1234.5"
- *                    oder "P,1234.5"
- *  - WebSocketSensor: ESP32 im WLAN, das dieselben Zeilen schickt
+ *  - DemoSensor:      Simulator, damit die Anzeige ohne Gerät läuft
+ *  - SerialSensor:    ESP32 am USB-Port (Web Serial)
+ *  - WebSocketSensor: ESP32 im WLAN, mit automatischem Wiederverbinden
+ *
+ * Das Zeilenformat ist in `protocol.ts` beschrieben. Beide Sensoren
+ * übersetzen Gerätezeit in die Zeitachse des Browsers, damit die
+ * Schlag-Erkennung unabhängig von der Übertragungsverzögerung funktioniert.
  */
+
+import { DeviceClock, LineFramer, parseSensorMessage } from './protocol';
+
+export interface SensorCallbacks {
+  onImpulse: (timestampMs: number) => void;
+  /** Verbindungszustand; `detail` ist eine Meldung für die Anzeige. */
+  onState?: (state: SensorState, detail?: string) => void;
+  /** Zusatzdaten für die Diagnose (WLAN-Pegel, Sensordiagnose). */
+  onTelemetry?: (telemetry: SensorTelemetry) => void;
+}
+
+export type SensorState = 'connecting' | 'open' | 'reconnecting' | 'closed';
+
+export interface SensorTelemetry {
+  rssi: number | null;
+  clients: number | null;
+  pulsesPerSec: number | null;
+  pulseWidthMs: number | null;
+  clockCalibrated: boolean;
+  lastMessageAt: number | null;
+}
 
 export interface ImpulseSource {
   readonly label: string;
-  start(onImpulse: (timestampMs: number) => void): Promise<void>;
+  start(callbacks: SensorCallbacks): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -23,11 +47,12 @@ export class DemoSensor implements ImpulseSource {
 
   constructor(private readonly sample: (now: number) => number[]) {}
 
-  async start(onImpulse: (timestampMs: number) => void): Promise<void> {
+  async start(callbacks: SensorCallbacks): Promise<void> {
     await this.stop();
+    callbacks.onState?.('open', 'Demo-Sensor');
     const step = () => {
       const now = performance.now();
-      for (const at of this.sample(now)) onImpulse(at);
+      for (const at of this.sample(now)) callbacks.onImpulse(at);
       this.timer = window.setTimeout(step, 25);
     };
     this.timer = window.setTimeout(step, 25);
@@ -41,17 +66,11 @@ export class DemoSensor implements ImpulseSource {
 
 interface SerialLineSourceOptions {
   baudRate?: number;
-  /** Protokoll: "raw" = nur Zeitstempel, "elapsed" = Host-Zeit beim Empfang. */
-  mode?: 'device-time' | 'host-time';
 }
 
 /**
- * Web Serial: liest ASCII-Zeilen vom ESP32.
- *
- * Unterstützte Formate pro Zeile:
- *   "1234.5"        -> Gerätezeit in ms (mode: device-time)
- *   "P,1234.5"      -> Impuls mit Gerätezeit
- *   "I"             -> Impuls, Host-Zeit wird verwendet
+ * Web Serial: liest die ASCII-Zeilen des ESP32 am USB-Port.
+ * Nice-to-have für die Werkbank; im Studio läuft der WLAN-Weg.
  */
 export class SerialSensor implements ImpulseSource {
   readonly label = 'ESP32 (USB)';
@@ -59,7 +78,11 @@ export class SerialSensor implements ImpulseSource {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private closing = false;
   private readonly decoder = new TextDecoder();
-  private buffer = '';
+  private readonly framer = new LineFramer();
+  private readonly clock = new DeviceClock();
+  private callbacks: SensorCallbacks | null = null;
+  private bootId: number | null = null;
+  private telemetry: SensorTelemetry = emptyTelemetry();
 
   constructor(private readonly options: SerialLineSourceOptions = {}) {}
 
@@ -67,20 +90,33 @@ export class SerialSensor implements ImpulseSource {
     return typeof navigator !== 'undefined' && typeof navigator.serial?.requestPort === 'function';
   }
 
-  async start(onImpulse: (timestampMs: number) => void): Promise<void> {
+  getTelemetry(): SensorTelemetry {
+    return this.telemetry;
+  }
+
+  async start(callbacks: SensorCallbacks): Promise<void> {
     if (!SerialSensor.supported) {
       throw new Error('Web Serial wird von diesem Browser nicht unterstützt (Chrome/Edge am Desktop nutzen)');
     }
+    this.callbacks = callbacks;
+    callbacks.onState?.('connecting', 'Port auswählen …');
+
     const port = await navigator.serial.requestPort();
     this.port = port;
     await port.open({ baudRate: this.options.baudRate ?? 115200 });
     this.closing = false;
-    this.readLoop(onImpulse).catch((error: unknown) => {
-      if (!this.closing) console.error('[serial] Lesefehler', error);
+    this.framer.reset();
+    this.clock.reset();
+    callbacks.onState?.('open', 'ESP32 über USB');
+
+    this.readLoop(callbacks).catch((error: unknown) => {
+      if (this.closing) return;
+      callbacks.onState?.('closed', 'USB-Verbindung unterbrochen');
+      console.error('[serial] Lesefehler', error);
     });
   }
 
-  private async readLoop(onImpulse: (timestampMs: number) => void): Promise<void> {
+  private async readLoop(callbacks: SensorCallbacks): Promise<void> {
     const port = this.port;
     if (!port?.readable) return;
     const reader = port.readable.getReader();
@@ -89,7 +125,10 @@ export class SerialSensor implements ImpulseSource {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (value) this.handleChunk(value, onImpulse);
+        if (!value) continue;
+        for (const line of this.framer.push(this.decoder.decode(value, { stream: true }))) {
+          this.handleLine(line, callbacks.onImpulse);
+        }
       }
     } finally {
       reader.releaseLock();
@@ -97,18 +136,41 @@ export class SerialSensor implements ImpulseSource {
     }
   }
 
-  private handleChunk(chunk: Uint8Array, onImpulse: (timestampMs: number) => void): void {
-    this.buffer += this.decoder.decode(chunk, { stream: true });
-    const lines = this.buffer.split(/\r?\n/);
-    this.buffer = lines.pop() ?? '';
+  private handleLine(line: string, onImpulse: (timestampMs: number) => void): void {
+    const message = parseSensorMessage(line);
+    if (!message) return;
     const now = performance.now();
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (line === '') continue;
-      const value = parseSerialLine(line, now, this.options.mode ?? 'host-time');
-      if (value !== null) onImpulse(value);
+    this.telemetry.lastMessageAt = now;
+
+    switch (message.kind) {
+      case 'impulse': {
+        const stamp =
+          message.deviceMs === null
+            ? now
+            : this.clock.toHost(message.deviceMs, now, this.bootId);
+        this.telemetry.clockCalibrated = this.clock.calibrated;
+        onImpulse(stamp);
+        break;
+      }
+      case 'hello':
+        this.bootId = message.bootId;
+        this.clock.reset();
+        this.clock.toHost(message.deviceMs, now, message.bootId);
+        this.telemetry.clockCalibrated = this.clock.calibrated;
+        break;
+      case 'status':
+        this.telemetry.rssi = message.rssi;
+        this.telemetry.clients = message.clients;
+        this.telemetry.pulsesPerSec = message.pulsesPerSec;
+        this.callbacks?.onTelemetry?.(this.telemetry);
+        break;
+      case 'pulseWidth':
+        this.telemetry.pulseWidthMs = message.ms;
+        this.callbacks?.onTelemetry?.(this.telemetry);
+        break;
+      default:
+        break;
     }
-    if (this.buffer.length > 4096) this.buffer = '';
   }
 
   async stop(): Promise<void> {
@@ -124,74 +186,212 @@ export class SerialSensor implements ImpulseSource {
       /* Port war schon zu */
     }
     this.port = null;
+    this.callbacks?.onState?.('closed');
+    this.callbacks = null;
   }
 }
 
-/** WebSocket-Sensor für ESP32 im WLAN. */
+export interface WebSocketSourceOptions {
+  url: string;
+  /** Wartezeit vor dem ersten Wiederverbinden in ms. */
+  retryBaseMs?: number;
+  /** Obergrenze für die Wartezeit zwischen zwei Versuchen. */
+  retryMaxMs?: number;
+  /** Nach so langer Stille gilt die Verbindung als tot. */
+  silenceTimeoutMs?: number;
+}
+
+/**
+ * WebSocket-Sensor für den ESP32 im WLAN.
+ *
+ * Im Studio hängt das Tablet an der Wand – die Verbindung darf nicht
+ * stehenbleiben, nur weil der ESP32 einmal neu startet oder das WLAN
+ * kurz wegbricht. Deshalb: automatisches Wiederverbinden mit
+ * exponentiellem Backoff, Wachhund gegen stille Verbindungen und
+ * eine Statusmeldung, die auch sagt, was los ist.
+ */
 export class WebSocketSensor implements ImpulseSource {
   readonly label = 'ESP32 (WLAN)';
   private socket: WebSocket | null = null;
+  private callbacks: SensorCallbacks | null = null;
+  private retryTimer: number | null = null;
+  private silenceTimer: number | null = null;
+  private attempt = 0;
+  private stopped = true;
+  private readonly framer = new LineFramer();
+  private readonly clock = new DeviceClock();
+  private bootId: number | null = null;
+  private telemetry: SensorTelemetry = emptyTelemetry();
+  private readonly retryBaseMs: number;
+  private readonly retryMaxMs: number;
+  private readonly silenceTimeoutMs: number;
 
-  constructor(private readonly url: string) {}
+  constructor(private readonly options: WebSocketSourceOptions) {
+    this.retryBaseMs = options.retryBaseMs ?? 500;
+    this.retryMaxMs = options.retryMaxMs ?? 10_000;
+    this.silenceTimeoutMs = options.silenceTimeoutMs ?? 8000;
+  }
 
-  async start(onImpulse: (timestampMs: number) => void): Promise<void> {
-    await this.stop();
-    await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(this.url);
+  get url(): string {
+    return this.options.url;
+  }
+
+  getTelemetry(): SensorTelemetry {
+    return this.telemetry;
+  }
+
+  async start(callbacks: SensorCallbacks): Promise<void> {
+    this.callbacks = callbacks;
+    this.stopped = false;
+    this.attempt = 0;
+    await this.connect();
+  }
+
+  private connect(): Promise<void> {
+    const callbacks = this.callbacks;
+    if (!callbacks || this.stopped) return Promise.resolve();
+
+    callbacks.onState?.(this.attempt === 0 ? 'connecting' : 'reconnecting', this.options.url);
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(this.options.url);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('Ungültige WebSocket-Adresse'));
+        return;
+      }
       this.socket = socket;
-      socket.onopen = () => resolve();
-      socket.onerror = () => reject(new Error(`Verbindung zu ${this.url} fehlgeschlagen.`));
+      this.framer.reset();
+
+      socket.onopen = () => {
+        settled = true;
+        this.attempt = 0;
+        this.clock.reset();
+        callbacks.onState?.('open', `ESP32 im WLAN (${this.options.url})`);
+        this.armWatchdog();
+        resolve();
+      };
+
       socket.onmessage = (event: MessageEvent<string>) => {
+        this.armWatchdog();
         const now = performance.now();
-        for (const line of String(event.data).split(/\r?\n/)) {
-          const value = parseSerialLine(line.trim(), now, 'host-time');
-          if (value !== null) onImpulse(value);
+        for (const line of this.framer.push(String(event.data))) {
+          this.handleLine(line, now, callbacks.onImpulse);
         }
+      };
+
+      socket.onerror = () => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Verbindung zu ${this.options.url} fehlgeschlagen`));
+        }
+      };
+
+      socket.onclose = () => {
+        this.disarmWatchdog();
+        this.socket = null;
+        if (this.stopped) {
+          resolve();
+          return;
+        }
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Verbindung zu ${this.options.url} fehlgeschlagen`));
+        }
+        this.scheduleRetry();
       };
     });
   }
 
+  private scheduleRetry(): void {
+    if (this.stopped || this.retryTimer !== null) return;
+    this.attempt += 1;
+    const delay = Math.min(this.retryMaxMs, this.retryBaseMs * 2 ** Math.min(this.attempt - 1, 6));
+    const seconds = Math.round(delay / 100) / 10;
+    this.callbacks?.onState?.(
+      'reconnecting',
+      `Verbindung verloren – neuer Versuch in ${seconds.toString().replace('.', ',')} s`,
+    );
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = null;
+      this.connect().catch(() => {
+        /* onclose des Fehlversuchs plant den nächsten Versuch ein */
+      });
+    }, delay);
+  }
+
+  private armWatchdog(): void {
+    this.disarmWatchdog();
+    this.silenceTimer = window.setTimeout(() => {
+      // Stille Verbindung: harter Neustart, sonst bleibt die Anzeige stehen
+      this.callbacks?.onState?.('reconnecting', 'Sensor meldet sich nicht');
+      this.socket?.close();
+    }, this.silenceTimeoutMs);
+  }
+
+  private disarmWatchdog(): void {
+    if (this.silenceTimer !== null) window.clearTimeout(this.silenceTimer);
+    this.silenceTimer = null;
+  }
+
+  private handleLine(line: string, now: number, onImpulse: (timestampMs: number) => void): void {
+    const message = parseSensorMessage(line);
+    if (!message) return;
+    this.telemetry.lastMessageAt = now;
+
+    switch (message.kind) {
+      case 'impulse': {
+        const stamp =
+          message.deviceMs === null ? now : this.clock.toHost(message.deviceMs, now, this.bootId);
+        this.telemetry.clockCalibrated = this.clock.calibrated;
+        onImpulse(stamp);
+        break;
+      }
+      case 'hello':
+        this.bootId = message.bootId;
+        this.clock.reset();
+        this.clock.toHost(message.deviceMs, now, message.bootId);
+        this.telemetry.clockCalibrated = this.clock.calibrated;
+        break;
+      case 'status':
+        this.telemetry.rssi = message.rssi;
+        this.telemetry.clients = message.clients;
+        this.telemetry.pulsesPerSec = message.pulsesPerSec;
+        this.callbacks?.onTelemetry?.(this.telemetry);
+        break;
+      case 'pulseWidth':
+        this.telemetry.pulseWidthMs = message.ms;
+        this.callbacks?.onTelemetry?.(this.telemetry);
+        break;
+      default:
+        break;
+    }
+  }
+
   async stop(): Promise<void> {
-    this.socket?.close();
+    this.stopped = true;
+    this.disarmWatchdog();
+    if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    const socket = this.socket;
     this.socket = null;
+    if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
+    this.callbacks?.onState?.('closed');
+    this.callbacks = null;
   }
 }
 
-/**
- * Parst eine Sensorzeile.
- * Gibt den Impulszeitpunkt in performance.now()-Koordinaten zurück oder null.
- */
-export function parseSerialLine(
-  line: string,
-  hostTimeMs: number,
-  mode: 'device-time' | 'host-time',
-): number | null {
-  if (line === '') return null;
-  const parts = line.split(/[,;\s]+/).filter(Boolean);
-  if (parts.length === 0) return null;
-
-  const head = parts[0]!.toUpperCase();
-  const isPulseTag = head === 'P' || head === 'I' || head === 'IMPULSE';
-  const numberToken = isPulseTag ? parts[1] : parts[0];
-  if (numberToken === undefined) {
-    // Reiner Marker wie "I" -> Host-Zeit
-    return isPulseTag ? hostTimeMs : null;
-  }
-
-  const numeric = Number(numberToken.replace(',', '.'));
-  if (!Number.isFinite(numeric)) return null;
-
-  if (mode === 'device-time' || numeric > 0) {
-    if (mode === 'host-time') return hostTimeMs;
-    return toHostClock(numeric);
-  }
-  return hostTimeMs;
-}
-
-/** Gerätezeit in ms -> Performance-Zeitachse. */
-function toHostClock(deviceMs: number): number {
-  const offset = (performance as Performance & { timeOrigin?: number }).timeOrigin ?? Date.now() - performance.now();
-  return deviceMs - (offset % 1_000_000);
+function emptyTelemetry(): SensorTelemetry {
+  return {
+    rssi: null,
+    clients: null,
+    pulsesPerSec: null,
+    pulseWidthMs: null,
+    clockCalibrated: false,
+    lastMessageAt: null,
+  };
 }
 
 declare global {

@@ -10,6 +10,13 @@ const dashboard = new Dashboard(root, {
   onReset: () => controller.reset(),
   onDragFactor: (value) => controller.setDragFactor(value),
   onSourceChange: (kind, url) => void controller.switchSource(kind, url ? { url } : {}),
+  onConnectWs: (url) => {
+    dashboard.setSettingsHint('Verbinde mit dem Sensor …');
+    void controller.switchSource('ws', { url }).then(() => {
+      const status = controller.getStatus();
+      dashboard.setSettingsHint(status.message);
+    });
+  },
   onEffortChange: (spm, pace) => controller.setDemoEffort(spm, pace),
   onConnectStrap: () => {
     void controller
@@ -45,5 +52,19 @@ const controller = new RowerController({
   onStatus: (status) => dashboard.updateStatus(status),
   onSession: (state) => dashboard.setSessionState(state),
 });
+
+// Kiosk-Ansicht fürs Studio-Tablet: ?kiosk=1 blendet Einstellungen und
+// Steuerung aus. Eine Berührung holt sie für 6 Sekunden zurück.
+const params = new URLSearchParams(location.search);
+if (params.get('kiosk') === '1') {
+  document.documentElement.classList.add('kiosk');
+  dashboard.setMinimalView(true);
+  let hideTimer: number | null = null;
+  window.addEventListener('pointerdown', () => {
+    dashboard.setMinimalView(false);
+    if (hideTimer !== null) window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => dashboard.setMinimalView(true), 6000);
+  });
+}
 
 void controller.init();

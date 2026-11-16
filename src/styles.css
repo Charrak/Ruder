@@ -516,9 +516,11 @@ button {
 
 .side {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* Splits oben (flexibel), Steuerung unten (auto). Zwei Kinder, zwei Zeilen. */
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: clamp(12px, 1.4vw, 18px);
   min-height: 0;
+  max-height: 100%;
 }
 
 .panel {
@@ -527,6 +529,10 @@ button {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  /* Bei offenen Einstellungen auf kleinen Tablets scrollt das Panel,
+     statt den Bildschirm zu sprengen. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .panel__head {
@@ -554,6 +560,7 @@ button {
   gap: 6px;
   overflow: hidden;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .split-row {
@@ -743,6 +750,69 @@ select option {
   color: var(--paper);
 }
 
+.btn--compact {
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.field__hint {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: rgba(159, 179, 200, 0.78);
+}
+
+.field__hint code {
+  font-family: var(--font-numeric);
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.settings__hint {
+  margin: 0;
+  min-height: 1em;
+  font-size: 0.78rem;
+  color: var(--lime-soft);
+}
+
+.settings__hint:empty {
+  display: none;
+}
+
+.diag {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.diag[hidden] {
+  display: none;
+}
+
+.diag__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.76rem;
+}
+
+.diag__row span:first-child {
+  color: var(--ink-muted);
+  letter-spacing: 0.06em;
+}
+
+.diag__row span:last-child {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .value-badge {
   min-width: 56px;
   text-align: right;
@@ -793,6 +863,38 @@ select option {
   .clock {
     display: none;
   }
+}
+
+/* ---------- Kiosk-Modus (?kiosk=1) ----------
+   Im Studio soll die Anzeige die Fläche füllen, nicht die Bedienung.
+   Die Steuerung kommt bei Berührung für ein paar Sekunden zurück. */
+
+.kiosk .side {
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.is-minimal .side {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+.is-minimal .topbar .status-pill,
+.is-minimal .clock {
+  opacity: 0.45;
+}
+
+.kiosk .hero {
+  grid-column: 1 / -1;
+}
+
+.kiosk .layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.kiosk .is-minimal .layout,
+.kiosk .layout {
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

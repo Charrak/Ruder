@@ -1,10 +1,26 @@
 import { RowerEngine, type EngineSnapshot } from '../core/engine';
 import { RowerSimulator } from '../core/simulator';
 import { Session, targetPace, type Workout } from '../core/session';
-import { DemoSensor, SerialSensor, WebSocketSensor, type ImpulseSource } from '../input/sources';
+import {
+  DemoSensor,
+  SerialSensor,
+  WebSocketSensor,
+  type ImpulseSource,
+  type SensorCallbacks,
+  type SensorState,
+  type SensorTelemetry,
+} from '../input/sources';
 import { HeartRateMonitor, HeartRateSimulator, type HeartRateReading } from '../input/heartRate';
 
 export type SourceKind = 'demo' | 'serial' | 'ws';
+
+const SETTINGS_KEY = 'ruder.settings.v1';
+
+interface StoredSettings {
+  source: SourceKind;
+  url: string;
+  dragFactor: number;
+}
 
 export interface ControllerEvents {
   onFrame: (frame: Frame) => void;
@@ -38,6 +54,11 @@ export interface Status {
   connected: boolean;
   message: string;
   dragFactor: number;
+  /** Verbindungszustand der gewählten Quelle. */
+  state: SensorState;
+  telemetry: SensorTelemetry | null;
+  /** Adresse/Port der aktiven Quelle, für die Diagnose. */
+  endpoint: string | null;
 }
 
 export class RowerController {
@@ -54,6 +75,10 @@ export class RowerController {
   private status: Status;
   private wsUrl = '';
   private baudRate = 115200;
+  private fallback: DemoSensor | null = null;
+  private telemetry: SensorTelemetry | null = null;
+  private preferredSource: SourceKind = 'demo';
+  private preferredUrl = '';
   private hrMonitor = new HeartRateMonitor();
   private hrSimulator = new HeartRateSimulator();
   private hrSource: 'demo' | 'strap' = 'demo';
@@ -68,7 +93,15 @@ export class RowerController {
     this.engine = new RowerEngine({ dragFactor: 120 });
     this.session = new Session({ kind: 'free' });
     this.simulator = new RowerSimulator({ spm: 24, paceSecPer500: 128 });
-    this.status = { source: 'demo', connected: false, message: 'Demo-Sensor', dragFactor: 120 };
+    this.status = {
+      source: 'demo',
+      connected: false,
+      message: 'Demo-Sensor',
+      dragFactor: 120,
+      state: 'closed',
+      telemetry: null,
+      endpoint: null,
+    };
   }
 
   get activeSource(): SourceKind {
@@ -76,8 +109,49 @@ export class RowerController {
   }
 
   async init(): Promise<void> {
-    await this.switchSource('demo');
+    this.restoreSettings();
+    await this.switchSource(this.preferredSource, this.preferredUrl ? { url: this.preferredUrl } : {});
     this.loop();
+  }
+
+  /** Merkt sich Sensorwahl und Adresse, damit das Tablet nach einem Neustart weiterläuft. */
+  private restoreSettings(): void {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const stored = JSON.parse(raw) as Partial<StoredSettings>;
+      if (stored.source === 'demo' || stored.source === 'serial' || stored.source === 'ws') {
+        this.preferredSource = stored.source;
+      }
+      if (typeof stored.url === 'string' && stored.url !== '') {
+        this.preferredUrl = stored.url;
+        this.wsUrl = stored.url;
+      }
+      if (typeof stored.dragFactor === 'number') {
+        this.engine.setDragFactor(stored.dragFactor);
+        this.status.dragFactor = this.engine.getDragFactor();
+      }
+    } catch {
+      /* kaputter Speicherinhalt darf den Start nicht verhindern */
+    }
+  }
+
+  private persistSettings(): void {
+    try {
+      const payload: StoredSettings = {
+        source: this.status.source,
+        url: this.wsUrl,
+        dragFactor: this.engine.getDragFactor(),
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
+    } catch {
+      /* privater Modus o. Ä. */
+    }
+  }
+
+  /** Aktueller Verbindungsstatus inkl. Diagnosewerten (für die Einstellungen). */
+  getStatus(): Status {
+    return this.status;
   }
 
   /** Brustgurt über Web Bluetooth verbinden. */
@@ -127,6 +201,7 @@ export class RowerController {
   setDragFactor(value: number): void {
     this.engine.setDragFactor(value);
     this.status.dragFactor = value;
+    this.persistSettings();
     this.events.onStatus(this.status);
   }
 
@@ -134,47 +209,118 @@ export class RowerController {
     this.session.workout = workout;
   }
 
+  /**
+   * Wechselt die Impulsquelle.
+   *
+   * `url` wird gemerkt, damit das Dashboard nach einem Neustart des ESP32
+   * oder nach dem Zurückwechseln aus dem Demo-Modus ohne erneute Eingabe
+   * wieder verbindet.
+   */
   async switchSource(kind: SourceKind, options: { url?: string; baudRate?: number } = {}): Promise<void> {
     if (options.url) this.wsUrl = options.url;
     if (options.baudRate) this.baudRate = options.baudRate;
 
     await this.source?.stop().catch(() => undefined);
     this.source = null;
+    this.telemetry = null;
 
     let next: ImpulseSource;
+    let endpoint: string;
     if (kind === 'serial') {
       next = new SerialSensor({ baudRate: this.baudRate });
+      endpoint = `USB ${this.baudRate} Baud`;
     } else if (kind === 'ws') {
-      next = new WebSocketSensor(this.wsUrl || defaultSocketUrl());
+      const url = this.wsUrl || defaultSocketUrl();
+      this.wsUrl = url;
+      next = new WebSocketSensor({ url });
+      endpoint = url;
     } else {
       next = new DemoSensor((now) => this.simulator.advance(now));
       this.simulator.reset();
+      endpoint = 'Demo';
     }
 
+    const callbacks: SensorCallbacks = {
+      onImpulse: (timestamp) => this.handleImpulse(timestamp),
+      onState: (state, detail) => this.handleSensorState(kind, endpoint, state, detail),
+      onTelemetry: (telemetry) => {
+        this.telemetry = telemetry;
+        this.status = { ...this.status, telemetry };
+        this.events.onStatus(this.status);
+      },
+    };
+
     try {
-      await next.start((t) => this.handleImpulse(t));
-      this.source = next;
-      this.status = {
-        source: kind,
-        connected: true,
-        message: kind === 'demo' ? 'Demo-Sensor' : next.label,
-        dragFactor: this.engine.getDragFactor(),
-      };
+      await next.start(callbacks);
     } catch (error) {
       const message = describeInputError(error);
       // Auf Demo zurückfallen, damit die Anzeige nie tot ist – die Ursache
       // aber sichtbar lassen.
-      await this.switchSource('demo');
-      this.status = {
-        source: 'demo',
-        connected: false,
-        message: `${message} – Demo aktiv`,
-        dragFactor: this.engine.getDragFactor(),
-      };
-      this.events.onStatus(this.status);
+      if (kind !== 'demo') {
+        await this.switchSource('demo');
+        this.status = {
+          ...this.status,
+          connected: false,
+          message: `${message} – Demo aktiv`,
+          state: 'closed',
+        };
+        this.events.onStatus(this.status);
+      }
       return;
     }
+
+    this.source = next;
+    this.persistSettings();
     this.events.onStatus(this.status);
+  }
+
+  /** Hält den Verbindungsstatus aktuell, auch bei Abbrüchen mitten im Betrieb. */
+  private handleSensorState(
+    kind: SourceKind,
+    endpoint: string,
+    state: SensorState,
+    detail?: string,
+  ): void {
+    const connected = state === 'open';
+    if (connected) this.stopDemoFallback();
+    const base = detail ?? endpoint;
+    const suffix =
+      state === 'reconnecting' ? '' : connected ? '' : kind === 'demo' ? '' : ' – Demo aktiv';
+    this.status = {
+      ...this.status,
+      source: kind,
+      connected,
+      state,
+      endpoint,
+      message: `${base}${suffix}`,
+      dragFactor: this.engine.getDragFactor(),
+      telemetry: this.telemetry,
+    };
+
+    // Ein Abbruch der echten Quelle darf das Dashboard nicht einfrieren:
+    // solange nicht verbunden, liefert der Demo-Sensor weiter Bewegung.
+    if (!connected && state === 'reconnecting') {
+      this.startDemoFallback();
+    }
+    this.events.onStatus(this.status);
+  }
+
+  /**
+   * Hält die Anzeige am Leben, wenn der Sensor im Betrieb wegbricht. Der
+   * Demo-Sensor läuft dann nur, bis die echte Quelle wieder verbindet –
+   * erkennbar an der Statusmeldung, nicht an stillen Werten.
+   */
+  private startDemoFallback(): void {
+    if (this.fallback) return;
+    const demo = new DemoSensor((now) => this.simulator.advance(now));
+    this.fallback = demo;
+    void demo.start({ onImpulse: (t) => this.handleImpulse(t) });
+  }
+
+  private stopDemoFallback(): void {
+    if (!this.fallback) return;
+    void this.fallback.stop();
+    this.fallback = null;
   }
 
   private handleImpulse(timestamp: number): void {

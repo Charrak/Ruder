@@ -8,7 +8,7 @@ import {
 } from '../core/format';
 import type { Frame, SessionSummary, Status } from '../core/controller';
 import { heartRateZone } from '../input/heartRate';
-import { pauseIcon, playIcon, resetIcon, settingsIcon } from './icons';
+import { fullscreenIcon, pauseIcon, playIcon, resetIcon, settingsIcon } from './icons';
 
 export interface DashboardHandlers {
   onToggle: () => void;
@@ -18,6 +18,7 @@ export interface DashboardHandlers {
   onEffortChange: (spm: number, paceSecPer500: number) => void;
   onWorkoutChange: (meter: number | null, seconds: number | null) => void;
   onConnectStrap: () => void;
+  onConnectWs: (url: string) => void;
 }
 
 interface Refs {
@@ -35,6 +36,9 @@ interface Refs {
   heartZone: HTMLElement;
   hrButton: HTMLButtonElement;
   workoutName: HTMLElement;
+  wsField: HTMLElement;
+  wsInput: HTMLInputElement;
+  diag: HTMLElement;
   splitFill: HTMLElement;
   summaryOverlay: HTMLElement;
   statusPill: HTMLElement;
@@ -190,12 +194,16 @@ export class Dashboard {
               <button class="btn btn--ghost" id="reset-btn" type="button" aria-label="Zurücksetzen" title="Zurücksetzen">
                 ${resetIcon}
               </button>
+              <button class="btn btn--ghost" id="kiosk-btn" type="button" aria-label="Vollbild" title="Vollbild (F)">
+                ${fullscreenIcon}
+              </button>
               <button class="btn btn--ghost" id="settings-btn" type="button" aria-label="Einstellungen" aria-expanded="false" title="Einstellungen">
                 ${settingsIcon}
               </button>
             </div>
 
             <div class="settings" id="settings" hidden>
+              <p class="settings__hint" id="settings-hint" role="status"></p>
               <label class="field">
                 <span class="field__label">Herzfrequenzgurt</span>
                 <button class="btn btn--ghost btn--wide" id="hr-btn" type="button">
@@ -210,10 +218,24 @@ export class Dashboard {
                   <option value="ws">ESP32 im WLAN (WebSocket)</option>
                 </select>
               </label>
-              <label class="field" id="ws-field" hidden>
-                <span class="field__label">WebSocket-Adresse</span>
-                <input type="text" id="ws-url" placeholder="ws://esp32.local:81/" />
-              </label>
+              <div class="field" id="ws-field" hidden>
+                <span class="field__label">WebSocket-Adresse des Sensors</span>
+                <div class="field__row">
+                  <input type="text" id="ws-url" placeholder="ws://ruder-sensor.local:81/" inputmode="url" />
+                  <button class="btn btn--ghost btn--compact" id="ws-connect" type="button">Verbinden</button>
+                </div>
+                <span class="field__hint">
+                  Adresse des Sensors im Studio-WLAN. Die Diagnoseseite des Sensors liegt unter
+                  <code>http://IP/</code>.
+                </span>
+              </div>
+              <div class="diag" id="diag" hidden>
+                <div class="diag__row"><span>Sensor</span><span id="diag-endpoint">–</span></div>
+                <div class="diag__row"><span>Zustand</span><span id="diag-state">–</span></div>
+                <div class="diag__row"><span>WLAN-Pegel</span><span id="diag-rssi">–</span></div>
+                <div class="diag__row"><span>Impulse/s</span><span id="diag-pps">–</span></div>
+                <div class="diag__row"><span>Uhr abgeglichen</span><span id="diag-clock">–</span></div>
+              </div>
               <label class="field">
                 <span class="field__label">Drag-Faktor</span>
                 <div class="field__row">
@@ -293,6 +315,9 @@ export class Dashboard {
       heartZone: get('heart-zone'),
       hrButton: get('hr-btn') as HTMLButtonElement,
       workoutName: get('workout-name'),
+      wsField: get('ws-field'),
+      wsInput: get('ws-url') as HTMLInputElement,
+      diag: get('diag'),
       splitFill: get('split-fill'),
       summaryOverlay: get('summary'),
     };
@@ -318,6 +343,20 @@ export class Dashboard {
       q('#effort-field').toggleAttribute('hidden', kind !== 'demo');
       const url = q<HTMLInputElement>('#ws-url').value.trim();
       this.handlers.onSourceChange(kind, url || undefined);
+    });
+
+    q('#ws-connect').addEventListener('click', () => {
+      const url = normalizeWsUrl(this.refs.wsInput.value);
+      if (!url) {
+        this.setSettingsHint('Bitte eine Adresse wie ws://ruder-sensor.local:81/ eingeben.');
+        return;
+      }
+      this.refs.wsInput.value = url;
+      this.handlers.onConnectWs(url);
+    });
+
+    this.refs.wsInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') q<HTMLButtonElement>('#ws-connect').click();
     });
 
     q<HTMLInputElement>('#df-range').addEventListener('input', (event) => {
@@ -346,6 +385,7 @@ export class Dashboard {
     });
 
     q('#hr-btn').addEventListener('click', () => this.handlers.onConnectStrap());
+    q('#kiosk-btn').addEventListener('click', () => void this.toggleFullscreen());
     q('#summary-close').addEventListener('click', () => this.hideSummary());
     q('#summary-again').addEventListener('click', () => {
       this.hideSummary();
@@ -362,13 +402,39 @@ export class Dashboard {
         this.handlers.onToggle();
       }
       if (event.key === 'r' || event.key === 'R') this.handlers.onReset();
+      if (event.key === 'f' || event.key === 'F') void this.toggleFullscreen();
     });
   }
 
   updateStatus(status: Status): void {
-    this.refs.statusText.textContent = status.message;
+    this.setText(this.refs.statusText, status.message);
     this.refs.statusPill.classList.toggle('status-pill--live', status.connected);
     this.refs.statusPill.classList.toggle('status-pill--warn', !status.connected);
+
+    this.refs.wsField.toggleAttribute('hidden', status.source !== 'ws');
+    if (status.endpoint && status.source === 'ws' && this.refs.wsInput.value === '') {
+      this.refs.wsInput.value = status.endpoint;
+    }
+
+    const showDiag = status.source !== 'demo';
+    this.refs.diag.toggleAttribute('hidden', !showDiag);
+    if (!showDiag) return;
+
+    const telemetry = status.telemetry;
+    const set = (id: string, value: string) => {
+      const el = this.refs.root.querySelector<HTMLElement>(`#${id}`);
+      if (el) this.setText(el, value);
+    };
+    set('diag-endpoint', status.endpoint ?? '–');
+    set('diag-state', stateLabel(status.state));
+    set('diag-rssi', telemetry?.rssi != null ? `${telemetry.rssi} dBm` : '–');
+    set('diag-pps', telemetry?.pulsesPerSec != null ? formatNumber(telemetry.pulsesPerSec, 1) : '–');
+    set('diag-clock', telemetry?.clockCalibrated ? 'ja' : 'nein');
+  }
+
+  setSettingsHint(message: string): void {
+    const el = this.refs.root.querySelector<HTMLElement>('#settings-hint');
+    if (el) this.setText(el, message);
   }
 
   setSessionState(state: 'idle' | 'running' | 'paused' | 'finished'): void {
@@ -613,7 +679,71 @@ export class Dashboard {
     this.refs.hrButton.textContent = text;
   }
 
+  /** Vollbild an/aus – im Studio der Unterschied zwischen Tablet und Anzeige. */
+  async toggleFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      this.setSettingsHint('Vollbild ist in diesem Browser nicht erlaubt.');
+    }
+  }
+
+  /** Blendet Steuerung und Einstellungen aus (z. B. für den Fernseher). */
+  setMinimalView(minimal: boolean): void {
+    this.refs.root.classList.toggle('is-minimal', minimal);
+  }
+
   toggleSettings(open: boolean): void {
     this.refs.settings.toggleAttribute('hidden', !open);
+  }
+}
+
+/**
+ * Macht aus "192.168.1.50" eine vollständige WebSocket-Adresse.
+ *
+ * Im Studio tippt niemand ein Protokoll ein. Erlaubt sind daher auch
+ * Kurzformen ohne Schema – aber nur für Host/IP, nicht für fremde
+ * Protokolle wie http://, die sonst als Host missverstanden würden.
+ */
+export function normalizeWsUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (trimmed === '') return null;
+
+  let candidate = trimmed;
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  if (!hasScheme) {
+    if (/^(https?|ftp|file):/i.test(trimmed)) return null;
+    candidate = `ws://${trimmed.replace(/^\/+/, '')}`;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return null;
+  if (url.hostname === '') return null;
+
+  // Port nur im unverschlüsselten Fall und nur, wenn keiner angegeben war
+  if (url.port === '' && url.protocol === 'ws:') url.port = '81';
+  if (url.pathname === '') url.pathname = '/';
+  return url.toString();
+}
+
+function stateLabel(state: Status['state']): string {
+  switch (state) {
+    case 'open':
+      return 'verbunden';
+    case 'connecting':
+      return 'verbindet …';
+    case 'reconnecting':
+      return 'Verbindung verloren, neuer Versuch';
+    default:
+      return 'getrennt';
   }
 }

@@ -15,6 +15,7 @@ const handlers = {
   onEffortChange: noop,
   onWorkoutChange: noop,
   onConnectStrap: noop,
+  onConnectWs: noop,
 };
 
 function mount() {
@@ -90,11 +91,27 @@ describe('Dashboard', () => {
 
   it('kennzeichnet den Sensor-Status', () => {
     const { root, dashboard } = mount();
-    dashboard.updateStatus({ source: 'demo', connected: true, message: 'Demo-Sensor', dragFactor: 120 });
+    dashboard.updateStatus({
+      source: 'demo',
+      connected: true,
+      message: 'Demo-Sensor',
+      dragFactor: 120,
+      state: 'open',
+      telemetry: null,
+      endpoint: 'Demo',
+    });
     const pill = root.querySelector('#status-pill')!;
     expect(pill.classList.contains('status-pill--live')).toBe(true);
 
-    dashboard.updateStatus({ source: 'ws', connected: false, message: 'WLAN nicht erreichbar', dragFactor: 120 });
+    dashboard.updateStatus({
+      source: 'ws',
+      connected: false,
+      message: 'WLAN nicht erreichbar',
+      dragFactor: 120,
+      state: 'reconnecting',
+      telemetry: null,
+      endpoint: 'ws://esp32.local:81/',
+    });
     expect(pill.classList.contains('status-pill--warn')).toBe(true);
     expect(root.querySelector('#status-text')?.textContent).toBe('WLAN nicht erreichbar');
   });
@@ -149,6 +166,67 @@ expect(rows[0]?.querySelector('.split-row__pace')?.textContent).toBe('2:05,0');
 
     dashboard.hideSummary();
     expect(overlay.hidden).toBe(true);
+  });
+
+  it('normalisiert die eingegebene Sensoradresse beim Verbinden', () => {
+    const calls: string[] = [];
+    document.body.innerHTML = '<div id="app"></div>';
+    const dashboard = new Dashboard(document.querySelector<HTMLDivElement>('#app')!, {
+      ...handlers,
+      onConnectWs: (url) => calls.push(url),
+    });
+    const input = document.querySelector<HTMLInputElement>('#ws-url')!;
+    const button = document.querySelector<HTMLButtonElement>('#ws-connect')!;
+    input.value = 'ruder-sensor.local';
+
+    button.click();
+    expect(calls).toEqual(['ws://ruder-sensor.local:81/']);
+    // Die korrigierte Adresse steht sichtbar im Feld
+    expect(input.value).toBe('ws://ruder-sensor.local:81/');
+
+    input.value = 'kein richtiger wert mit leerzeichen';
+    button.click();
+    expect(calls).toHaveLength(1);
+    expect(document.querySelector('#settings-hint')?.textContent).toContain('Bitte eine Adresse');
+
+    void dashboard;
+  });
+
+  it('zeigt die Diagnose nur bei echter Sensorquelle', () => {
+    const { root, dashboard } = mount();
+    const diag = root.querySelector<HTMLElement>('#diag')!;
+
+    dashboard.updateStatus({
+      source: 'demo',
+      connected: true,
+      message: 'Demo-Sensor',
+      dragFactor: 120,
+      state: 'open',
+      telemetry: null,
+      endpoint: 'Demo',
+    });
+    expect(diag.hidden).toBe(true);
+
+    dashboard.updateStatus({
+      source: 'ws',
+      connected: true,
+      message: 'ESP32 im WLAN',
+      dragFactor: 120,
+      state: 'open',
+      endpoint: 'ws://192.168.1.50:81/',
+      telemetry: {
+        rssi: -58,
+        clients: 1,
+        pulsesPerSec: 9.6,
+        pulseWidthMs: null,
+        clockCalibrated: true,
+        lastMessageAt: 100,
+      },
+    });
+    expect(diag.hidden).toBe(false);
+    expect(root.querySelector('#diag-rssi')?.textContent).toBe('-58 dBm');
+    expect(root.querySelector('#diag-pps')?.textContent).toBe('9,6');
+    expect(root.querySelector('#diag-clock')?.textContent).toBe('ja');
   });
 
   it('reagiert auf Tastatur (Leertaste, R)', () => {

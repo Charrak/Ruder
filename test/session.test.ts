@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatDelta, formatDistance, formatNumber, formatPace, formatSeconds } from '../src/core/format';
 import { Session } from '../src/core/session';
-import { parseSerialLine } from '../src/input/sources';
+import { parseSensorMessage } from '../src/input/protocol';
 
 describe('Formatierung', () => {
   it('formatiert Split-Zeiten mit Zehntel und Komma', () => {
@@ -91,17 +91,24 @@ describe('Session', () => {
 
 describe('Sensor-Protokoll', () => {
   it('liest reine Impulsmarker', () => {
-    expect(parseSerialLine('I', 1234, 'host-time')).toBe(1234);
-    expect(parseSerialLine('P,99.5', 500, 'host-time')).toBe(500);
+    expect(parseSensorMessage('I')).toEqual({ kind: 'impulse', deviceMs: null });
+    expect(parseSensorMessage('P,99.5')).toEqual({ kind: 'impulse', deviceMs: 99.5 });
   });
 
-  it('ignoriert Müll und leere Zeilen', () => {
-    expect(parseSerialLine('', 0, 'host-time')).toBeNull();
-    expect(parseSerialLine('boot ok', 0, 'host-time')).toBeNull();
-    expect(parseSerialLine('   ', 0, 'host-time')).toBeNull();
+  it('ignoriert Leerzeilen und Kommentare', () => {
+    expect(parseSensorMessage('')).toBeNull();
+    expect(parseSensorMessage('   ')).toBeNull();
+    expect(parseSensorMessage('# debug')).toBeNull();
   });
 
-  it('akzeptiert Dezimalkomma', () => {
-    expect(parseSerialLine('12,5', 999, 'host-time')).toBe(999);
+  it('meldet unbekannte Zeilen, ohne zu werfen', () => {
+    expect(parseSensorMessage('boot ok')).toEqual({ kind: 'unknown', raw: 'boot ok' });
+  });
+
+  it('akzeptiert Dezimalpunkt und ganzzahlige Werte', () => {
+    expect(parseSensorMessage('P,12.5')).toEqual({ kind: 'impulse', deviceMs: 12.5 });
+    expect(parseSensorMessage('P,1250')).toEqual({ kind: 'impulse', deviceMs: 1250 });
+    // Komma trennt Felder, nicht Nachkommastellen im Protokoll
+    expect(parseSensorMessage('P,12,5')).toEqual({ kind: 'impulse', deviceMs: 12 });
   });
 });

@@ -1,0 +1,6 @@
+# Zugangsdaten bleiben lokal
+ruder_sensor/include/config.h
+.pio
+.pioenvs
+.piolibdeps
+build/
