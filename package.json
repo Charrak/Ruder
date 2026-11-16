@@ -1,0 +1,23 @@
+{
+  "name": "ruder",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Live-Ruder-Dashboard für physio & fit VitalZentrum Eschweiler",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "emulator": "node tools/device-emulator.mjs --port 8081"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "jsdom": "^31.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4",
+    "ws": "^8.23.0"
+  }
+}
