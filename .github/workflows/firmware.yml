@@ -52,7 +52,7 @@ jobs:
   # der Firmware gegen Arduino-Stubs. Läuft in Sekunden und fängt die
   # meisten Fehler ab, bevor die Toolchain überhaupt startet.
   # ---------------------------------------------------------------------
-  prüfen:
+  preflight:
     name: Host-Tests und Syntax
     runs-on: ubuntu-24.04
     steps:
@@ -72,9 +72,9 @@ jobs:
   # ---------------------------------------------------------------------
   # Der eigentliche Build. Läuft erst, wenn die Vorprüfung grün ist.
   # ---------------------------------------------------------------------
-  bauen:
+  build:
     name: .bin bauen
-    needs: prüfen
+    needs: preflight
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -105,13 +105,41 @@ jobs:
             pio-${{ runner.os }}-${{ env.PLATFORMIO_CORE_VERSION }}-
 
       - name: Firmware bauen
+        id: build
         working-directory: ${{ env.FIRMWARE_DIR }}
-        run: pio run
+        run: |
+          # Ausgabe mitschreiben: die Rohlogs sind je nach Repo-Einstellung
+          # nicht immer abrufbar, eine Annotation dagegen schon.
+          set -o pipefail
+          pio run 2>&1 | tee /tmp/pio-build.log
+
+      # Fehlerursache sichtbar machen, auch wenn niemand an die Rohlogs kommt:
+      # die letzten Zeilen mit "error" landen als Annotation am Workflow.
+      - name: Fehlerursache melden
+        if: failure()
+        run: |
+          if [ ! -f /tmp/pio-build.log ]; then
+            echo "::error::Build-Protokoll fehlt – PlatformIO wurde nicht gestartet."
+            exit 0
+          fi
+          ZEILEN=$(grep -iE "error|fatal|not found|undefined reference|cannot find" /tmp/pio-build.log | head -15)
+          if [ -z "$ZEILEN" ]; then
+            ZEILEN=$(tail -25 /tmp/pio-build.log)
+          fi
+          # Mehrzeilige Ausgabe als eine Annotation, %-Zeichen maskiert
+          echo "::error::pio run fehlgeschlagen:%0A$(echo "$ZEILEN" | sed 's/%/%25/g; s/$/%0A/' | tr -d '\r')"
+          echo
+          echo "### Build-Protokoll (letzte 60 Zeilen)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -60 /tmp/pio-build.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Erzeugte Dateien auflisten
+        if: success()
         run: ls -la "${FIRMWARE_DIR}/.pio/build/esp32dev/"
 
       - name: Flaschanleitung erzeugen
+        if: success()
         run: |
           BILD=".pio/build/esp32dev"
           BEKANNT="${FIRMWARE_DIR}/${BILD}"
@@ -224,7 +252,7 @@ jobs:
           cat "${AUSGABE}/SHA256SUMS.txt"
 
       - name: Artefakt hochladen
-        if: github.event_name != 'pull_request'
+        if: success() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -262,9 +290,9 @@ jobs:
   # Veröffentlichen: bei einem Tag (v1.2.3) oder manuellem Lauf mit
   # "release" werden die Dateien an ein GitHub-Release gehängt.
   # ---------------------------------------------------------------------
-  veröffentlichen:
+  release:
     name: Release
-    needs: bauen
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release
     runs-on: ubuntu-24.04
     steps:

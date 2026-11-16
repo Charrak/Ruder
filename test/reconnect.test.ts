@@ -103,7 +103,11 @@ describe('WebSocketSensor', () => {
 
   it('steigert die Wartezeit zwischen den Versuchen', async () => {
     const sensor = create();
-    void sensor.start({ onImpulse: () => undefined, onState: () => undefined });
+    // Der Start scheitert hier absichtlich. Die Rejection wird eingesammelt,
+    // sonst meldet Vitest einen "unhandled rejection".
+    void sensor
+      .start({ onImpulse: () => undefined, onState: () => undefined })
+      .catch(() => undefined);
     await flush();
     FakeSocket.instances[0]!.fail();
     await vi.advanceTimersByTimeAsync(150);
@@ -170,13 +174,15 @@ describe('WebSocketSensor', () => {
     const sensor = create('ws://nicht-vorhanden:81/');
     const states: SensorState[] = [];
     const detail: string[] = [];
-    void sensor.start({
-      onImpulse: () => undefined,
-      onState: (s, message) => {
-        states.push(s);
-        if (message) detail.push(message);
-      },
-    });
+    void sensor
+      .start({
+        onImpulse: () => undefined,
+        onState: (s, message) => {
+          states.push(s);
+          if (message) detail.push(message);
+        },
+      })
+      .catch(() => undefined);
     await flush();
     FakeSocket.instances[0]!.fail();
     expect(states).toContain('reconnecting');

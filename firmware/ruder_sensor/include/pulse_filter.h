@@ -29,6 +29,18 @@ struct PulseStats {
 
 struct FilterConfig {
   uint32_t debounceUs = 3000;
+
+  /**
+   * Standardkonstruktor bewusst ausgeschrieben.
+   *
+   * Mit dem Standardparameter `= 3000` in C++11 wurde die Klasse von
+   * Aggregat-Initialisierung ausgeschlossen; `FilterConfig{DEBOUNCE_US}`
+   * ist bei älteren GCC-Versionen der ESP32-Toolchain (8.4 in PlatformIO
+   * 6.x, Standard dort gnu++11) dann kein gültiger Ausdruck. So geht beides:
+   * `FilterConfig{}` und `FilterConfig{ms}`.
+   */
+  FilterConfig() = default;
+  explicit FilterConfig(uint32_t us) : debounceUs(us) {}
 };
 
 /**

@@ -15,7 +15,27 @@
  * (P = 2.80 / v^3, v in m/s).
  */
 
+/** Impulse pro Schwungradumdrehung (Magnete am Rad, alle 60°). */
 export const PULSES_PER_REV = 6;
+
+/**
+ * Weg pro Schwungradumdrehung in Metern.
+ *
+ * 2,5 m ist ein Community-Richtwert für Concept2-Ergometer, nicht von
+ * Concept2 bestätigt. Wenn die Strecke systematisch daneben liegt, ist das
+ * die Stellschraube – nicht der Sensor:
+ *
+ *   eine bekannte Strecke auf dem PM fahren (z. B. 1000 m laut PM3),
+ *   die Meter im Dashboard ablesen und rechnen:
+ *
+ *     DISTANCE_PER_REV = 2,5 * (PM-Meter / Dashboard-Meter)
+ *
+ * Beispiel: PM3 zeigt 1000 m, das Dashboard 980 m
+ *   -> 2,5 * (1000 / 980) = 2,551 m
+ *
+ * Der Split skaliert mit, die Leistung ebenfalls (sie hängt an ω, nicht an
+ * dieser Konstante). Nach dem Ändern einmal gegen den PM-Split prüfen.
+ */
 export const DISTANCE_PER_REV = 2.5;
 
 /**
