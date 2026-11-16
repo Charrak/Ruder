@@ -22,14 +22,110 @@
 
 #include <Arduino.h>
 #include <ArduinoOTA.h>
+#include <Preferences.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
 #include <esp_timer.h>
 
+// Lokale Zugangsdaten (nicht im Repository). Fehlt die Datei – etwa im
+// CI-Build – greifen die Standardwerte direkt in der Firmware, sodass ohne
+// weitere Schritte eine lauffähige .bin entsteht.
+#if defined(__has_include)
+#if __has_include("config.h")
 #include "config.h"
+#define RUDER_HAS_USER_CONFIG 1
+#endif
+#endif
+#ifndef RUDER_HAS_USER_CONFIG
+#define RUDER_HAS_USER_CONFIG 0
+#endif
+
 #include "pulse_filter.h"
+
+/* ---------- Standardwerte ----------
+ * Bewusst schwach: ein Werksgerät hat kein WLAN und startet deshalb im
+ * Einrichtungsmodus (access point "ruder-sensor-setup"). Wer die Firmware
+ * selbst baut, kann in include/config.h alles vorgeben – dann entfällt die
+ * Einrichtung am Gerät.
+ *
+ * Diese #ifndef-Blöcke füllen nur, was config.h nicht gesetzt hat.
+ */
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
+#ifndef USE_STATIC_IP
+#define USE_STATIC_IP false
+#endif
+#ifndef STATIC_IP
+#define STATIC_IP "0.0.0.0"
+#endif
+#ifndef STATIC_GATEWAY
+#define STATIC_GATEWAY "0.0.0.0"
+#endif
+#ifndef STATIC_SUBNET
+#define STATIC_SUBNET "255.255.255.0"
+#endif
+#ifndef STATIC_DNS
+#define STATIC_DNS "0.0.0.0"
+#endif
+#ifndef MDNS_HOSTNAME
+#define MDNS_HOSTNAME "ruder-sensor"
+#endif
+#ifndef SENSOR_PIN
+#define SENSOR_PIN 27
+#endif
+#ifndef SENSOR_USE_INTERNAL_PULLUP
+#define SENSOR_USE_INTERNAL_PULLUP true
+#endif
+#ifndef SENSOR_TRIGGER_RISING
+#define SENSOR_TRIGGER_RISING true
+#endif
+#ifndef DEBOUNCE_US
+#define DEBOUNCE_US 3000
+#endif
+#ifndef PULSE_BUFFER_SIZE
+#define PULSE_BUFFER_SIZE 128
+#endif
+#ifndef WS_PORT
+#define WS_PORT 81
+#endif
+#ifndef HTTP_PORT
+#define HTTP_PORT 80
+#endif
+#ifndef STATUS_INTERVAL_MS
+#define STATUS_INTERVAL_MS 5000
+#endif
+#ifndef WS_SEND_BATCH
+#define WS_SEND_BATCH 12
+#endif
+#ifndef MAX_WS_CLIENTS
+#define MAX_WS_CLIENTS 4
+#endif
+#ifndef OTA_ENABLED
+#define OTA_ENABLED true
+#endif
+#ifndef OTA_HOSTNAME
+#define OTA_HOSTNAME "ruder-sensor"
+#endif
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD "ruder-ota"
+#endif
+#ifndef SERIAL_MIRROR
+#define SERIAL_MIRROR true
+#endif
+#ifndef WIFI_TIMEOUT_MS
+#define WIFI_TIMEOUT_MS 20000
+#endif
+
+// Zugangsdaten fehlen -> Einrichtungsmodus. So ist eine frisch geflashte
+// .bin ohne eigene config.h sofort benutzbar statt in einer Neustart-
+// schleife zu hängen.
+#define WIFI_CONFIGURED (sizeof(WIFI_SSID) > 1)
 
 namespace {
 
@@ -114,7 +210,66 @@ void handleSocketEvent(uint8_t client, WStype_t type, uint8_t *payload, size_t l
   }
 }
 
-void connectWifi() {
+/* ---------- Einrichtungsmodus ----------
+ * Eine frisch geflashte .bin kennt kein WLAN. Statt endlos neu zu starten,
+ * öffnet das Gerät einen Access Point mit einer kleinen Seite: Netz wählen,
+ * Passwort eingeben, fertig. Die Zugangsdaten liegen im NVS und überleben
+ * Firmware-Updates.
+ */
+
+Preferences gConfig;
+bool gSetupMode = false;
+String gSavedSsid;
+String gSavedPassword;
+
+const char *kPreferenceNamespace = "ruder";
+
+void loadSavedWifi() {
+  gConfig.begin(kPreferenceNamespace, true);
+  gSavedSsid = gConfig.getString("ssid", "");
+  gSavedPassword = gConfig.getString("pass", "");
+  gConfig.end();
+}
+
+void saveWifi(const String &ssid, const String &password) {
+  gConfig.begin(kPreferenceNamespace, false);
+  gConfig.putString("ssid", ssid);
+  gConfig.putString("pass", password);
+  gConfig.end();
+}
+
+/**
+ * WLAN-Zugangsdaten, die tatsächlich verwendet werden.
+ * Rückgabe als Kopie: ein Verweis auf ein temporäres String-Objekt wäre
+ * nach demreturn ungültig.
+ */
+String activeSsid() {
+  return gSavedSsid.length() > 0 ? gSavedSsid : String(WIFI_SSID);
+}
+
+String activePassword() {
+  return gSavedSsid.length() > 0 ? gSavedPassword : String(WIFI_PASSWORD);
+}
+
+String htmlEscape(const String &value) {
+  String out;
+  out.reserve(value.length());
+  for (size_t i = 0; i < value.length(); i++) {
+    const char c = value[i];
+    if (c == '&') {
+      out += F("&amp;");
+    } else if (c == '<') {
+      out += F("&lt;");
+    } else if (c == '"') {
+      out += F("&quot;");
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+bool connectWifi() {
 #if USE_STATIC_IP
   IPAddress ip, gateway, subnet, dns;
   ip.fromString(STATIC_IP);
@@ -131,24 +286,24 @@ void connectWifi() {
   // Modem-Schlaf spart Strom, kostet aber Latenz und Jitter – im Studio
   // hängt das Gerät am Netzteil.
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  Serial.print("# WLAN verbinden");
+  const String ssid = activeSsid();
+  WiFi.begin(ssid.c_str(), activePassword().c_str());
+
+  Serial.printf("# WLAN verbinden mit \"%s\"", ssid.c_str());
   const uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
     Serial.print(".");
-    if (millis() - start > 30000) {
+    if (millis() - start > WIFI_TIMEOUT_MS) {
       Serial.println();
       Serial.println("# WLAN nicht erreichbar.");
-      Serial.println("# Prüfen: include/config.h (SSID/Passwort), 2,4-GHz-Netz.");
-      Serial.println("# Das Gerät startet in 10 s neu und versucht es erneut.");
-      delay(10000);
-      ESP.restart();
+      return false;
     }
   }
   Serial.printf("\n# WLAN verbunden: %s (Kanal %d, %d dBm)\n", WiFi.localIP().toString().c_str(),
                 WiFi.channel(), WiFi.RSSI());
+  return true;
 }
 
 void startMdns() {
@@ -208,6 +363,57 @@ void setupHttp() {
   gHttp.begin();
 }
 
+void startSetupMode() {
+  gSetupMode = true;
+  WiFi.mode(WIFI_AP);
+  const String apName = String("ruder-sensor-setup");
+  WiFi.softAP(apName.c_str());
+  Serial.println();
+  Serial.println("# ===== EINRICHTUNGSMODUS =====");
+  Serial.printf("# WLAN \"%s\" öffnen (kein Passwort)\n", apName.c_str());
+  Serial.printf("# Danach http://%s/ aufrufen\n", WiFi.softAPIP().toString().c_str());
+  Serial.println("# =============================");
+
+  gHttp.on("/", HTTP_GET, []() {
+    String html = F("<!doctype html><meta charset=utf-8><title>Ruder-Sensor einrichten</title>");
+    html += F("<meta name=viewport content='width=device-width,initial-scale=1'>");
+    html += F("<style>body{font:16px system-ui;background:#082543;color:#f4f7fa;padding:24px;max-width:520px;margin:auto}");
+    html += F("h1{color:#b5e900;font-size:1.1rem;letter-spacing:.1em;text-transform:uppercase}");
+    html += F("label{display:block;margin:16px 0 6px;color:#9fb3c8;font-size:.8rem;letter-spacing:.1em;text-transform:uppercase}");
+    html += F("input{width:100%;padding:11px;border-radius:8px;border:1px solid #1d4a76;background:#0d2f52;color:#f4f7fa;font-size:1rem}");
+    html += F("button{margin-top:20px;width:100%;padding:14px;border:0;border-radius:8px;background:#b5e900;color:#04172a;font-weight:700;font-size:1rem}");
+    html += F("small{color:#9fb3c8;display:block;margin-top:14px;line-height:1.5}</style>");
+    html += F("<h1>Ruder-Sensor einrichten</h1><form method=post action=/save>");
+    html += F("<label>WLAN-Name (2,4 GHz)</label><input name=ssid required maxlength=32>");
+    html += F("<label>Passwort</label><input name=pass type=password maxlength=64>");
+    html += F("<button type=submit>Speichern und neu starten</button></form>");
+    html += F("<small>Der ESP32 kann nur 2,4-GHz-Netze. Nach dem Speichern startet das Gerät neu und meldet sich als ");
+    html += F("ruder-sensor.local.</small>");
+    gHttp.send(200, "text/html; charset=utf-8", html);
+  });
+
+  gHttp.on("/save", HTTP_POST, []() {
+    const String ssid = gHttp.arg("ssid");
+    const String password = gHttp.arg("pass");
+    if (ssid.length() == 0) {
+      gHttp.send(400, "text/plain; charset=utf-8", "WLAN-Name fehlt");
+      return;
+    }
+    saveWifi(ssid, password);
+    String html = F("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>");
+    html += F("<body style='font:16px system-ui;background:#082543;color:#f4f7fa;padding:24px'>");
+    html += F("<h1 style='color:#b5e900'>Gespeichert</h1><p>Das Gerät startet neu und verbindet mit ");
+    html += htmlEscape(ssid);
+    html += F(".</p><p>Danach: <code>http://ruder-sensor.local/</code></p></body>");
+    gHttp.send(200, "text/html; charset=utf-8", html);
+    Serial.printf("# WLAN-Zugangsdaten für \"%s\" gespeichert, Neustart\n", ssid.c_str());
+    delay(1200);
+    ESP.restart();
+  });
+
+  gHttp.begin();
+}
+
 void reportStatus() {
   static uint32_t lastReport = 0;
   static uint32_t lastAccepted = 0;
@@ -243,7 +449,25 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), onSensorPulse,
                   SENSOR_TRIGGER_RISING ? RISING : FALLING);
 
-  connectWifi();
+  loadSavedWifi();
+
+  // Ohne Zugangsdaten (frisch geflashte .bin, CI-Build) in den
+  // Einrichtungsmodus. Gespeicherte Zugangsdaten haben Vorrang vor der
+  // config.h, damit ein Gerät im Feld per Weboberfläche umziehen kann.
+  const bool haveCredentials = activeSsid().length() > 0;
+  if (!haveCredentials) {
+    startSetupMode();
+    return;
+  }
+
+  if (!connectWifi()) {
+    // Zugangsdaten vorhanden, aber Netz weg: Einrichtung erneut anbieten,
+    // statt das Gerät in einer Neustartschleife zu lassen.
+    Serial.println("# Einrichtungsmodus startet – Netz prüfen und neu eingeben.");
+    startSetupMode();
+    return;
+  }
+
   startMdns();
   setupHttp();
   startOta();
@@ -257,6 +481,12 @@ void setup() {
 }
 
 void loop() {
+  if (gSetupMode) {
+    gHttp.handleClient();
+    delay(2);
+    return;
+  }
+
   gWebSocket.loop();
   gHttp.handleClient();
 #if OTA_ENABLED
@@ -284,7 +514,10 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("# WLAN verloren – verbinde neu");
     WiFi.disconnect();
-    connectWifi();
+    if (!connectWifi()) {
+      Serial.println("# Kein Netz – Einrichtungsmodus startet nach Neustart");
+      ESP.restart();
+    }
   }
 
   // Kurz schlafen: gibt dem WLAN-Stack Zeit, ohne die Latenz zu erhöhen.

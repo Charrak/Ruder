@@ -43,7 +43,8 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 | `npm test` | 70 Tests (Physik, Protokoll, Wiederverbinden, UI, Integration) |
 | `npm run emulator` | ESP32-Sensor simulieren |
 | `cd firmware && make test` | Firmware-Logik auf dem Rechner testen |
-| `cd firmware/ruder_sensor && pio run -t upload` | Firmware flashen |
+| `cd firmware && make check-syntax` | `main.cpp` gegen Arduino-Stubs prüfen |
+| `cd firmware/ruder_sensor && pio run -t upload` | Firmware selbst bauen und flashen |
 
 ## Was es kann
 
@@ -58,6 +59,30 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 - **Kiosk-Modus** (`?kiosk=1`) für den Dauerbetrieb am Tablet.
 - **Selbstheilende Verbindung**: WLAN-Abriss, Sensor-Neustart und stille
   Verbindungen werden erkannt, die Anzeige verbindet selbst neu.
+
+## Fertige Firmware (.bin) ohne Entwicklungsumgebung
+
+Die CI baut bei jedem Lauf auf `main` und bei jedem Tag `v*` flashfertige
+Dateien — **Actions → Firmware ESP32 → Artifacts**. Bei Tags landen sie
+zusätzlich in einem Release. Im Paket:
+
+| Datei | Adresse |
+| --- | --- |
+| `ruder-sensor-esp32dev.bin` | `0x10000` |
+| `ruder-sensor-esp32dev-bootloader.bin` | `0x1000` |
+| `ruder-sensor-esp32dev-partitions.bin` | `0x8000` |
+| `ruder-sensor-esp32dev-boot_app0.bin` | `0xe000` |
+| `flashen.sh` / `flashen.bat` | fertige Befehle mit diesen Adressen |
+
+```bash
+pip install esptool
+./flashen.sh /dev/ttyUSB0        # Windows: flashen.bat COM3
+```
+
+Die Dateien enthalten **kein WLAN**. Nach dem Flashen öffnet das Board das
+WLAN `ruder-sensor-setup`; darüber wird das Studio-Netz eingetragen und im
+NVS gespeichert — es überlebt weitere Updates. Details in
+[docs/inbetriebnahme.md](docs/inbetriebnahme.md).
 
 ## Aufbau
 
@@ -75,6 +100,8 @@ src/
   styles.css            Design in den Markenfarben
 firmware/ruder_sensor/  ESP32-Firmware (PlatformIO)
 firmware/test/          Host-Test der Impulsverarbeitung
+firmware/stubs/         Arduino-Stubs für die Syntaxprüfung ohne Toolchain
+.github/workflows/      CI: Firmware bauen, .bin als Artefakt, Release bei Tags
 tools/device-emulator.mjs  Sensor ohne Hardware simulieren
 docs/                   Protokoll, Hardware, Inbetriebnahme
 public/brand/           Logo-Dateien aus dem Original-Logo abgeleitet
