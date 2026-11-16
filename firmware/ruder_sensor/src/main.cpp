@@ -27,6 +27,8 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
+#include <cstring>          // strlen()
+
 #include <esp_random.h>       // esp_random()
 #include <esp_system.h>       // esp_reset_reason()
 #include <esp_timer.h>        // esp_timer_get_time()
@@ -174,14 +176,14 @@ void sendLine(const String &line) {
 #if SERIAL_MIRROR
   Serial.print(line);
 #endif
-  gWebSocket.broadcastTXT(line);
+  gWebSocket.broadcastTXT(reinterpret_cast<const uint8_t *>(line.c_str()), line.length());
 }
 
 void announceToClient(uint8_t client) {
   char greeting[48];
   snprintf(greeting, sizeof(greeting), "B,%lu,%lu\n", static_cast<unsigned long>(gBootId),
            static_cast<unsigned long>(millis()));
-  gWebSocket.sendTXT(client, greeting);
+  gWebSocket.sendTXT(client, reinterpret_cast<uint8_t *>(greeting), strlen(greeting));
 }
 
 void handleSocketEvent(uint8_t client, WStype_t type, uint8_t *payload, size_t length) {
@@ -204,7 +206,7 @@ void handleSocketEvent(uint8_t client, WStype_t type, uint8_t *payload, size_t l
         const ruder::PulseStats stats = statsSnapshot();
         char diag[32];
         snprintf(diag, sizeof(diag), "T,%.3f\n", stats.minPeriodUs / 1000.0F);
-        gWebSocket.sendTXT(client, diag);
+        gWebSocket.sendTXT(client, reinterpret_cast<uint8_t *>(diag), strlen(diag));
       }
       break;
     }
