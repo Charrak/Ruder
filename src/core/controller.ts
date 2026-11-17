@@ -109,16 +109,21 @@ export class RowerController {
   }
 
   async init(): Promise<void> {
-    this.restoreSettings();
+    const gespeichert = this.restoreSettings();
+    // Kommt die Seite vom ESP32, ist der Sensor die naheliegende Quelle:
+    // niemand soll am Tablet erst eine Adresse eintippen müssen.
+    if (!gespeichert && laeuftAufSensor()) {
+      this.preferredSource = 'ws';
+    }
     await this.switchSource(this.preferredSource, this.preferredUrl ? { url: this.preferredUrl } : {});
     this.loop();
   }
 
   /** Merkt sich Sensorwahl und Adresse, damit das Tablet nach einem Neustart weiterläuft. */
-  private restoreSettings(): void {
+  private restoreSettings(): boolean {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
-      if (!raw) return;
+      if (!raw) return false;
       const stored = JSON.parse(raw) as Partial<StoredSettings>;
       if (stored.source === 'demo' || stored.source === 'serial' || stored.source === 'ws') {
         this.preferredSource = stored.source;
@@ -131,8 +136,10 @@ export class RowerController {
         this.engine.setDragFactor(stored.dragFactor);
         this.status.dragFactor = this.engine.getDragFactor();
       }
+      return true;
     } catch {
       /* kaputter Speicherinhalt darf den Start nicht verhindern */
+      return false;
     }
   }
 
@@ -482,5 +489,21 @@ export function describeInputError(error: unknown): string {
 
 function defaultSocketUrl(): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Bei http- und https-Seiten ist location.port leer, dann gilt 81.
+  // Kommt die Seite vom ESP32 selbst (Port 80), ist das dieselbe Adresse.
   return `${protocol}//${location.hostname}:81/`;
+}
+
+/**
+ * Läuft die Seite auf dem Sensor selbst?
+ *
+ * Der ESP32 liefert das Dashboard unter Port 80 aus, der Sensor hängt unter
+ * Port 81 derselben Adresse. In diesem Fall ist die Adresse bekannt: das
+ * Tablet braucht keine Eingabe, und das Dashboard verbindet beim ersten
+ * Start von allein – ohne Einstellung, ohne Tippen.
+ */
+export function laeuftAufSensor(host: string = location.hostname): boolean {
+  // http://ruder-sensor.local/ oder http://192.168.1.50/
+  return host !== '' && host !== 'localhost' && host !== '127.0.0.1' &&
+    location.protocol === 'http:';
 }

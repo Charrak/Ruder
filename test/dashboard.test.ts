@@ -62,7 +62,11 @@ describe('Dashboard', () => {
 
   it('rendert die Marke und die Hauptkennzahlen', () => {
     const { root } = mount();
-    expect(root.querySelector('.brand__mark')?.getAttribute('src')).toBe('/brand/logo-mark-light.png');
+    // Web-optimierte Variante (5,7 kB statt 67 kB) – die Druckdatei wäre auf
+    // dem ESP32 verschwendeter Flash.
+    expect(root.querySelector('.brand__mark')?.getAttribute('src')).toBe(
+      '/brand/web/logo-mark-light.png',
+    );
     expect(root.querySelector('#pace-main')?.textContent).toBe('–:––,–');
     expect(root.querySelector('#stat-spm')?.textContent).toContain('0');
     expect(root.textContent).toContain('VitalZentrum Eschweiler');

@@ -7,7 +7,13 @@ Splits – in der Marke von **physio & fit VitalZentrum Eschweiler**.
 Zugeschnitten auf einen **Concept2 Model C ohne USB**. Das alte PM2/PM3 hat
 keine Datenschnittstelle, deshalb kommen die Messwerte aus einem ESP32, der
 die Magnetimpulse des Schwungrads abgreift. Die Firmware liegt mit im
-Repository. Ohne Hardware läuft alles im **Demo-Modus**.
+Repository.
+
+**Der ESP32 liefert auch die Anzeige selbst aus.** Am Tablet wird nur
+`http://ruder-sensor.local/` geöffnet — kein Laptop, kein Webserver, kein
+Internet im Studio. Beim Bauen der Firmware wird das Dashboard eingebettet
+(`npm run build`, rund 70 kB Flash). Ohne Hardware läuft alles im
+**Demo-Modus**.
 
 ## Schnellstart
 
@@ -38,10 +44,12 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 | Befehl | Zweck |
 | --- | --- |
 | `npm run dev` | Entwicklungsserver, im ganzen WLAN erreichbar |
-| `npm run build` | Typprüfung + Produktions-Build nach `dist/` |
+| `npm run build` | Typprüfung, Build nach `dist/` **und** Einbetten in die Firmware |
 | `npm run preview` | gebauten Stand ausliefern |
 | `npm test` | 72 Tests (Physik, Protokoll, Wiederverbinden, UI, Integration) |
 | `npm run emulator` | ESP32-Sensor simulieren |
+| `npm run check:embed` | prüfen, ob das eingebettete Dashboard zum Build passt |
+| `node tools/sensor-server.mjs` | ESP32 **komplett** simulieren: liefert die Anzeige und den Sensor |
 | `cd firmware && make test` | Firmware-Logik auf dem Rechner testen |
 | `cd firmware && make check-syntax` | `main.cpp` gegen Arduino-Stubs prüfen |
 | `cd firmware/ruder_sensor && pio run -t upload` | Firmware selbst bauen und flashen |
@@ -92,6 +100,10 @@ baut die CI nur zur Kontrolle. Im Paket:
 pip install esptool
 ./flashen.sh /dev/ttyUSB0        # Windows: flashen.bat COM3
 ```
+
+Die `.bin` enthält das Dashboard, sofern vor dem Firmware-Bau einmal
+`npm run build` gelaufen ist. Fehlt es, baut die Firmware trotzdem und zeigt
+nur die Diagnoseseite unter `http://<IP>/status`.
 
 Die Dateien enthalten **kein WLAN**. Nach dem Flashen öffnet das Board das
 WLAN `ruder-sensor-setup`; darüber wird das Studio-Netz eingetragen und im

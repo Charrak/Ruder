@@ -54,7 +54,14 @@ PFLICHT=(
   "firmware/ruder_sensor/include/config.model-c-pm3.h:Model C mit PM3"
   ".github/workflows/firmware.yml:CI"
   "tools/device-emulator.mjs:Sensor simulieren"
+
+  "tools/sensor-server.mjs:ESP32 samt Anzeige simulieren"
+  "tools/embed-dashboard.mjs:Dashboard in die Firmware einbetten"
+  "tools/check-embedding.mjs:Einbettung prüfen"
   "tools/check-workflow.py:CI prüfen"
+  "firmware/ruder_sensor/include/dashboard_assets.h:eingebettete Anzeige"
+  "public/brand/web/logo-mark-light.png:Marke (web-optimiert)"
+  "test/sensorauslieferung.test.ts:Auslieferung durch den ESP32"
   "docs/inbetriebnahme.md:Inbetriebnahme"
   "docs/hardware.md:Hardware"
   "docs/protocol.md:Protokoll"
@@ -135,7 +142,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-kopf "5. Firmware"
+
+kopf "5. Dashboard in der Firmware"
+if [ -f firmware/ruder_sensor/include/dashboard_assets.h ]; then
+  if node tools/check-embedding.mjs >/tmp/check-all-embed.log 2>&1; then
+    KURZ="$(grep -oE '[0-9]+ Dateien, [0-9]+ kB' /tmp/check-all-embed.log | tail -1)"
+    gruen "Einbettung: ${KURZ:-geprüft}"
+  else
+    rot "Einbettung:"
+    grep -E "FEHLER" /tmp/check-all-embed.log | head -8 | sed 's/^/        /'
+  fi
+  if node tools/embed-dashboard.mjs --pruefen >/dev/null 2>&1; then
+    gruen "dashboard_assets.h passt zum Build in dist/"
+  else
+    rot "dashboard_assets.h ist veraltet – 'npm run build' erzeugt es neu"
+  fi
+else
+  rot "firmware/.../dashboard_assets.h fehlt – der ESP32 kann dann nur die Diagnoseseite"
+fi
+
+kopf "6. Firmware"
 if make -C firmware all >/tmp/check-all-firmware.log 2>&1; then
   TESTS="$(grep -cE '^(ok|PASS|bestanden)' /tmp/check-all-firmware.log || true)"
   gruen "Host-Tests und Syntaxprüfung (gnu++11)"
@@ -145,7 +171,8 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-kopf "6. CI-Workflow"
+
+kopf "7. CI-Workflow"
 if python3 -c "import yaml" >/dev/null 2>&1; then
   if python3 tools/check-workflow.py >/tmp/check-all-ci.log 2>&1; then
     gruen "tools/check-workflow.py"

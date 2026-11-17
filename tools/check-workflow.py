@@ -120,6 +120,39 @@ def main():
     pruefe('WIFI_SSID ""' in main_cpp, "Standard ohne WLAN-Zugangsdaten vorhanden")
     pruefe("startSetupMode" in main_cpp, "Einrichtungsmodus vorhanden")
 
+    # Das Dashboard steckt in der Firmware und wird beim Bauen eingebettet.
+    # Fehlt der Schritt, entsteht eine .bin ohne Anzeige - das faellt sonst
+    # erst am Tablet im Studio auf.
+    bau_steps = [s.get("name", "") for s in bau_job["steps"]]
+    pruefe(
+        any("einbetten" in name.lower() or "Dashboard bauen" in name for name in bau_steps),
+        "Dashboard wird vor dem Firmware-Bau eingebettet",
+    )
+    pruefe(
+        'if __has_include("dashboard_assets.h")' in main_cpp
+        or "__has_include(\"dashboard_assets.h\")" in main_cpp,
+        "Firmware baut auch ohne eingebettetes Dashboard",
+    )
+    pruefe(
+        "sendeDashboard" in main_cpp and "send_P" in main_cpp,
+        "Firmware liefert das Dashboard aus (PROGMEM, ohne Kopie im RAM)",
+    )
+
+    # Pfad-Filter: der Workflow muss auch anspringen, wenn sich das
+    # Dashboard oder die Einbettung aendert.
+    # PyYAML liest den Schlüssel "on" als True.
+    trigger = d.get(True) if True in d else d.get("on", {})
+    pull = trigger.get("pull_request", {}) if isinstance(trigger, dict) else {}
+    pfade = pull.get("paths", []) if isinstance(pull, dict) else []
+    pruefe(
+        any(p.startswith("src/") for p in pfade),
+        "Workflow startet auch bei Aenderungen am Dashboard (src/**)",
+    )
+    pruefe(
+        "tools/embed-dashboard.mjs" in pfade,
+        "Workflow startet bei Aenderungen an der Einbettung",
+    )
+
     print()
     if FEHLER:
         print(f"{len(FEHLER)} Probleme")

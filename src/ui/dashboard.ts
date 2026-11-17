@@ -80,7 +80,7 @@ export class Dashboard {
     return `
       <header class="topbar">
         <div class="brand">
-          <img class="brand__mark" src="/brand/logo-mark-light.png" alt="physio & fit" />
+          <img class="brand__mark" src="/brand/web/logo-mark-light.png" alt="physio & fit" />
           <div class="brand__text">
             <span class="brand__title">Ruder<em>dashboard</em></span>
             <span class="brand__sub">VitalZentrum Eschweiler</span>
@@ -268,7 +268,7 @@ export class Dashboard {
       <div class="summary" id="summary" hidden>
         <div class="summary__card card" role="dialog" aria-modal="true" aria-labelledby="summary-title">
           <div class="summary__head">
-            <img class="summary__mark" src="/brand/logo-mark-light.png" alt="" />
+            <img class="summary__mark" src="/brand/web/logo-mark-light.png" alt="" />
             <div>
               <div class="eyebrow">Training beendet</div>
               <h2 class="summary__title" id="summary-title">Zusammenfassung</h2>

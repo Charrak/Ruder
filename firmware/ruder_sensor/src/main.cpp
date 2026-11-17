@@ -27,7 +27,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include <cstring>          // strlen()
+#include <cstring>          // strlen(), memcmp()
 
 #include <esp_random.h>       // esp_random()
 #include <esp_system.h>       // esp_reset_reason()
@@ -49,6 +49,19 @@
 #endif
 
 #include "pulse_filter.h"
+
+// Das gebaute Dashboard, eingebettet von tools/embed-dashboard.mjs.
+// Fehlt der Header (frischer Checkout ohne npm run build), startet die
+// Firmware trotzdem – dann gibt es nur die Diagnoseseite.
+#if defined(__has_include)
+#if __has_include("dashboard_assets.h")
+#include "dashboard_assets.h"
+#define RUDER_HAS_DASHBOARD 1
+#endif
+#endif
+#ifndef RUDER_HAS_DASHBOARD
+#define RUDER_HAS_DASHBOARD 0
+#endif
 
 /* ---------- Standardwerte ----------
  * Bewusst schwach: ein Werksgerät hat kein WLAN und startet deshalb im
@@ -126,6 +139,11 @@
 #endif
 #ifndef WIFI_TIMEOUT_MS
 #define WIFI_TIMEOUT_MS 20000
+#endif
+// Dashboard direkt vom ESP32 ausliefern (http://ruder-sensor.local/).
+// Kostet rund 30 kB Flash, dafür braucht im Studio kein Laptop zu laufen.
+#ifndef DASHBOARD_AUSLIEFERN
+#define DASHBOARD_AUSLIEFERN true
 #endif
 
 // Zugangsdaten fehlen -> Einrichtungsmodus. So ist eine frisch geflashte
@@ -322,6 +340,82 @@ void startMdns() {
   Serial.printf("# Im Netz erreichbar als %s.local\n", MDNS_HOSTNAME);
 }
 
+/* ---------- Dashboard ausliefern ----------
+ * Das Tablet öffnet nur die Adresse des Geräts und bekommt die komplette
+ * Anzeige. Die Seite verbindet sich danach mit Port 81 auf derselben
+ * Adresse – deshalb ist im Dashboard keine Einstellung nötig.
+ *
+ * Die Dateien liegen unkomprimiert im Flash (PROGMEM). Sie liessen sich auf
+ * ein Drittel drücken, das kostete aber beim Ausliefern einen Puffer in
+ * Größe des JS-Bundles im RAM – ohne PSRAM knapp. Flash ist hier reichlich
+ * (App-Partition ~1,3 MB, Firmware ~580 kB), RAM nicht.
+ *
+ * Der HTTP-Stack liest PROGMEM selbst, deshalb kein Kopieren und kein
+ * malloc: ausliefern ist ein Zeiger plus Länge.
+ */
+#if RUDER_HAS_DASHBOARD && DASHBOARD_AUSLIEFERN
+
+/**
+ * Kennung einer Datei für den Zwischenspeicher (ETag). Das Tablet fragt beim
+ * Neuladen nur diese Kennung ab statt aller Dateien. Wichtig, weil das
+ * Dashboard aus einem Dutzend Teilen besteht und der ESP32 schmal ist.
+ */
+String etagFuer(const EingebetteteDatei *datei) {
+  return String(datei->pfad) + String("-") + String(kDashboardStand);
+}
+
+/** Datei im eingebetteten Satz suchen (Pfad ohne fuehrenden Schraegstrich). */
+const EingebetteteDatei *findeDatei(const String &pfad) {
+  for (size_t i = 0; i < kDashboardDateiAnzahl; i++) {
+    if (pfad == kDashboardDateien[i].pfad) return &kDashboardDateien[i];
+  }
+  return nullptr;
+}
+
+/**
+ * Eine Datei ausliefern. Rueckgabe false = Pfad unbekannt; es wurde nichts
+ * gesendet.
+ */
+bool sendeDatei(const EingebetteteDatei *datei) {
+  // Unveraendert? Dann nur "304 Nicht geaendert" und keine Daten.
+  const String kennung = gHttp.header("If-None-Match");
+  if (kennung.length() > 0 && kennung == etagFuer(datei)) {
+    gHttp.sendHeader("ETag", etagFuer(datei));
+    gHttp.send(304, datei->typ, "");
+    return true;
+  }
+
+  gHttp.sendHeader("ETag", etagFuer(datei));
+  // no-cache heisst nicht "nicht speichern", sondern "jedes Mal fragen" –
+  // mit dem ETag ist die Antwort dann meist ein kurzes 304.
+  gHttp.sendHeader("Cache-Control", "no-cache");
+  gHttp.setContentLength(datei->laenge);
+  gHttp.send_P(200, datei->typ, reinterpret_cast<PGM_P>(datei->daten), datei->laenge);
+  return true;
+}
+
+/**
+ * Datei anhand des angefragten Pfads ausliefern.
+ * Rueckgabe false = Pfad unbekannt (dann 404 oder Diagnoseseite).
+ */
+bool sendeDashboard(const String &pfad) {
+  String name = pfad;
+  if (name.startsWith("/")) name = name.substring(1);
+  const int frage = name.indexOf('?');
+  if (frage >= 0) name = name.substring(0, frage);
+  if (name.length() == 0) name = "index.html";
+
+  const EingebetteteDatei *datei = findeDatei(name);
+  if (datei == nullptr) return false;
+  return sendeDatei(datei);
+}
+
+#else  // kein eingebettetes Dashboard (Header fehlt oder abgeschaltet)
+
+bool sendeDashboard(const String &) { return false; }
+
+#endif  // RUDER_HAS_DASHBOARD && DASHBOARD_AUSLIEFERN
+
 void startOta() {
 #if OTA_ENABLED
   ArduinoOTA.setHostname(OTA_HOSTNAME);
@@ -333,39 +427,48 @@ void startOta() {
 #endif
 }
 
-/**
- * Diagnoseseite für die Werkbank: genau die Zahlen, die man beim
- * Ausrichten des Magneten braucht.
- */
-void setupHttp() {
-  gHttp.on("/", HTTP_GET, []() {
-    const ruder::PulseStats stats = statsSnapshot();
-    const float rate = stats.minPeriodUs > 0 && stats.minPeriodUs != UINT32_MAX
-                           ? 1000000.0F / static_cast<float>(stats.minPeriodUs)
-                           : 0.0F;
-    String html = F("<!doctype html><meta charset=utf-8><title>Ruder-Sensor</title>");
-    html += F("<meta name=viewport content='width=device-width,initial-scale=1'>");
-    html += F("<style>body{font:16px system-ui;background:#082543;color:#f4f7fa;padding:24px}");
-    html += F("h1{color:#b5e900;font-size:1.1rem;letter-spacing:.1em;text-transform:uppercase}");
-    html += F("td{padding:5px 18px 5px 0}td:first-child{color:#9fb3c8}");
-    html += F("small{color:#9fb3c8}</style>");
-    html += F("<h1>Ruder-Sensor</h1><table>");
-    html += "<tr><td>IP</td><td>" + WiFi.localIP().toString() + "</td></tr>";
-    html += "<tr><td>WLAN</td><td>" + String(WiFi.RSSI()) + " dBm</td></tr>";
-    html += "<tr><td>Dashboards</td><td>" + String(gWebSocket.connectedClients()) + "</td></tr>";
-    html += "<tr><td>Impulse gesamt</td><td>" + String(stats.accepted) + "</td></tr>";
-    html += "<tr><td>Prellen verworfen</td><td>" + String(stats.bounced) + "</td></tr>";
-    html += "<tr><td>Puffer verworfen</td><td>" + String(stats.dropped) + "</td></tr>";
-    html += "<tr><td>Kürzester Abstand</td><td>" + String(stats.minPeriodUs / 1000.0F) + " ms</td></tr>";
-    html += "<tr><td>Max. Impulse/s</td><td>" + String(rate, 1) + "</td></tr>";
-    html += "<tr><td>Laufzeit</td><td>" + String(millis() / 1000) + " s</td></tr>";
-    html += F("</table><p><small>WebSocket: ws://");
-    html += WiFi.localIP().toString() + ":" + String(WS_PORT) + F("/<br>");
-    html += F("Dashboard im Studio: Adresse dort unter Einstellungen eintragen.</small></p>");
-    gHttp.send(200, "text/html; charset=utf-8", html);
-  });
+void sendeStatusSeite() {
+  const ruder::PulseStats stats = statsSnapshot();
+  const float rate = stats.minPeriodUs > 0 && stats.minPeriodUs != UINT32_MAX
+                         ? 1000000.0F / static_cast<float>(stats.minPeriodUs)
+                         : 0.0F;
+  String html = F("<!doctype html><meta charset=utf-8><title>Ruder-Sensor</title>");
+  html += F("<meta name=viewport content='width=device-width,initial-scale=1'>");
+  html += F("<style>body{font:16px system-ui;background:#082543;color:#f4f7fa;padding:24px}");
+  html += F("h1{color:#b5e900;font-size:1.1rem;letter-spacing:.1em;text-transform:uppercase}");
+  html += F("td{padding:5px 18px 5px 0}td:first-child{color:#9fb3c8}");
+  html += F("a{color:#b5e900}small{color:#9fb3c8;line-height:1.6}</style>");
+  html += F("<h1>Ruder-Sensor – Diagnose</h1><table>");
+  html += "<tr><td>IP</td><td>" + WiFi.localIP().toString() + "</td></tr>";
+  html += "<tr><td>WLAN</td><td>" + String(WiFi.RSSI()) + " dBm</td></tr>";
+  html += "<tr><td>Dashboards</td><td>" + String(gWebSocket.connectedClients()) + "</td></tr>";
+  html += "<tr><td>Impulse gesamt</td><td>" + String(stats.accepted) + "</td></tr>";
+  html += "<tr><td>Prellen verworfen</td><td>" + String(stats.bounced) + "</td></tr>";
+  html += "<tr><td>Puffer verworfen</td><td>" + String(stats.dropped) + "</td></tr>";
+  html += "<tr><td>Kürzester Abstand</td><td>" + String(stats.minPeriodUs / 1000.0F) + " ms</td></tr>";
+  html += "<tr><td>Max. Impulse/s</td><td>" + String(rate, 1) + "</td></tr>";
+  html += "<tr><td>Laufzeit</td><td>" + String(millis() / 1000) + " s</td></tr>";
+  html += "<tr><td>Freier Speicher</td><td>" + String(ESP.getFreeHeap()) + " Byte</td></tr>";
+  html += F("</table><p><small>Anzeige: <a href=\"/\">http://");
+  html += WiFi.localIP().toString();
+  html += F("/</a><br>WebSocket: ws://");
+  html += WiFi.localIP().toString() + ":" + String(WS_PORT) + F("/<br>");
+  html += F("Am Tablet einfach <b>ruder-sensor.local</b> eintippen.</small></p>");
+  gHttp.send(200, "text/html; charset=utf-8", html);
+}
 
-  gHttp.onNotFound([]() { gHttp.send(404, "text/plain", "nicht gefunden"); });
+void setupHttp() {
+  gHttp.on("/", HTTP_GET, []() { sendeDashboard("/index.html"); });
+  gHttp.on("/index.html", HTTP_GET, []() { sendeDashboard("/index.html"); });
+  gHttp.onNotFound([]() {
+    const String pfad = gHttp.uri();
+    if (pfad == "/status" || pfad == "/diagnose") {
+      sendeStatusSeite();
+      return;
+    }
+    if (sendeDashboard(pfad)) return;
+    gHttp.send(404, "text/plain; charset=utf-8", "nicht gefunden");
+  });
   gHttp.begin();
 }
 
