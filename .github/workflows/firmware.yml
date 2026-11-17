@@ -96,7 +96,7 @@ jobs:
       # eingebettete Dashboard zum Build passt und im Flash-Budget bleibt -
       # ein Fehler an dieser Stelle würde sonst erst am Tablet auffallen.
       - name: Node bereitstellen
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -121,7 +121,7 @@ jobs:
       # ESP32 die Anzeige selbst aus. Muss vor "Firmware bauen" laufen,
       # sonst entsteht eine .bin ohne Anzeige (nur Diagnoseseite).
       - name: Node bereitstellen
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
