@@ -20,11 +20,13 @@ on:
     paths:
       - 'firmware/**'
       - '.github/workflows/firmware.yml'
+      - 'tools/check-workflow.py'
     tags: ['v*']
   pull_request:
     paths:
       - 'firmware/**'
       - '.github/workflows/firmware.yml'
+      - 'tools/check-workflow.py'
   workflow_dispatch:
     inputs:
       release:
