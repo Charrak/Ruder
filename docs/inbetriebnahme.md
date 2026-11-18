@@ -19,36 +19,48 @@ Sonst misst man den Fahrer, nicht das Gerät.
 
 Verdrahtung und Alternativen (Reed, Lichtschranke): [hardware.md](hardware.md).
 
-### Das PM3 bleibt am Gerät
+### Das PM2 bleibt am Gerät
 
-Das PM3 wird **nicht** ausgebaut und **nicht** elektrisch angefasst. Es
+Das PM2 wird **nicht** ausgebaut und **nicht** elektrisch angefasst. Es
 zeigt weiter Split, Schlagzahl und Kalorien an – der ESP32 ist eine zweite
 Quelle, keine Ersatzschaltung. Das hat zwei Vorteile: Wer ohne Dashboard
 rudert, sieht trotzdem seine Werte, und ein Ausfall des Sensors kostet
 nicht das ganze Training.
 
-Das PM3 taugt außerdem als Referenz zum Einmessen:
+Das PM2 taugt außerdem als Referenz zum Einmessen:
 
-| Anzeige | Vergleich | Was daraus folgt |
+| PM2-Anzeige | Vergleich | Was daraus folgt |
 | --- | --- | --- |
-| Strecke | 1.000 m laut PM3 vs. Dashboard | Streckenfaktor nachziehen, siehe unten |
-| Split | gleiche Einheit auf beiden | weicht er konstant ab: Drag-Faktor im Dashboard |
-| Schlagzahl | muss übereinstimmen | weicht sie ab: Magnete/Entprellung prüfen |
+| Strecke (m) | 1.000 m laut PM2 vs. Dashboard | Streckenfaktor nachziehen, siehe unten |
+| Split /500 m | gleiche Einheit auf beiden | weicht er konstant ab: Drag-Faktor im Dashboard |
+| Schlagzahl (spm) | muss übereinstimmen | weicht sie ab: Magnete/Entprellung prüfen |
+| Watt | PM2 zeigt den **letzten** Schlag, das Dashboard einen Mittelwert | kurz nach dem Anfahren normal; dauerhaft zu hoch/zu niedrig: Drag-Faktor |
 
-Die Watt-Anzeige des PM3 ist eine **Ableitung** aus der Bremsleistung, keine
-Messung. Kleine Unterschiede zum Dashboard sind normal und kein Fehler.
+Zwei Eigenheiten des PM2, die beim Vergleich irritieren können:
+
+- **Watt pro Schlag, nicht im Mittel.** Das PM2 zeigt die Leistung des
+  letzten Durchzugs. Das Dashboard mittelt über die letzten Schläge. Direkt
+  nach dem Anfahren oder bei stark wechselndem Tempo weichen sie deshalb
+  ab – verglichen wird erst nach 20–30 gleichmäßigen Schlägen.
+- **Watt sind eine Ableitung** aus der Bremsleistung, keine Messung. Kleine
+  Unterschiede zum Dashboard sind normal und kein Fehler.
+
+**Drag-Faktor ablesen:** am PM2 `READY` gedrückt halten, dann `DISPLAY` –
+dann zeigt es den Drag-Faktor. Denselben Wert im Dashboard unter
+Einstellungen eintragen. Ein sauberes Model C liegt üblich bei 115–130.
 
 **Strecke einmessen** (die einzige Stellschraube, wenn die Meter nicht
 passen): `DISTANCE_PER_REV` in `src/core/engine.ts` ist mit 2,5 m ein
 Community-Richtwert, nicht von Concept2 bestätigt.
 
 ```
-DISTANCE_PER_REV = 2,5 * (PM3-Meter / Dashboard-Meter)
+DISTANCE_PER_REV = 2,5 * (PM2-Meter / Dashboard-Meter)
 ```
 
-Beispiel: PM3 zeigt 1.000 m, das Dashboard 980 m → `2,5 * 1000/980 = 2,551`.
-Danach den Split gegen das PM3 prüfen. Die Leistung hängt an der
-Winkelgeschwindigkeit und ändert sich dadurch nicht.
+Beispiel: PM2 zeigt 1.000 m, das Dashboard 980 m → `2,5 * 1000/980 = 2,551`.
+Danach den Split gegen das PM2 prüfen. Die Leistung hängt an der
+Drehzahl, nicht an dieser Konstante – sie ändert sich durch das Einmessen
+nicht.
 
 ## 2. Firmware aufs Board bringen
 
@@ -110,8 +122,8 @@ Für eigene Anpassungen (Pins, Entprellzeit, fest eingetragene Zugangsdaten):
 ```bash
 cd firmware/ruder_sensor
 
-# Model C mit PM3: vorbereitete Vorlage nehmen
-cp include/config.model-c-pm3.h include/config.h
+# Model C mit PM2: vorbereitete Vorlage nehmen
+cp include/config.model-c-pm2.h include/config.h
 # oder für ein anderes Gerät:
 # cp include/config.example.h include/config.h
 
@@ -122,7 +134,7 @@ pio device monitor
 ```
 
 `config.h` ist gitignored – Passwörter landen nicht im Repository. Die
-Vorlage `config.model-c-pm3.h` enthält die Erklärungen zu jedem Wert
+Vorlage `config.model-c-pm2.h` enthält die Erklärungen zu jedem Wert
 (warum 3 ms Entprellung, warum feste IP, wo der Sensor sitzt).
 
 Der Einrichtungsmodus entfällt, wenn `WIFI_SSID` in `config.h` gesetzt ist.

@@ -1,9 +1,14 @@
 # Hardware: Concept2 Model C ohne USB am ESP32
 
-Das Model C (1990er) hat ein PM2/PM3 ohne Datenschnittstelle. Statt das
-Monster zu ersetzen, greift man die Drehung des Schwungrads ab und rechnet
-alles im Dashboard. Dieses Dokument beschreibt den Weg vom Magneten bis zur
-Anzeige.
+Das Model C (ab 1993) wurde mit dem **PM2** ausgeliefert – ohne
+Datenschnittstelle, ohne USB, ohne Aufzeichnung. Später wurden viele Geräte
+auf PM3 oder PM5 umgerüstet. Statt den Monitor zu ersetzen, greift man die
+Drehung des Schwungrads ab und rechnet alles im Dashboard. Dieses Dokument
+beschreibt den Weg vom Magneten bis zur Anzeige.
+
+Für diese Firmware ist der Unterschied zwischen PM2 und PM3/PM5 unerheblich:
+in beiden Fällen kommt kein Signal aus dem Monitor, sondern vom eigenen
+Sensor am Schwungrad.
 
 ## 1. Signal abnehmen
 
@@ -21,7 +26,7 @@ Schwungradumdrehung** (alle 60° ein Magnet). Das Dashboard rechnet mit
 `src/core/engine.ts` änderbar.
 
 !!! warning "Nicht in die Elektronik des PM eingreifen"
-    Der Sensor wird **parallel** montiert, nicht am PM2/PM3 angeschlossen.
+    Der Sensor wird **parallel** montiert, nicht am PM2 angeschlossen.
     Der Monitor bleibt funktionsfähig, das Dashboard ist eine Zusatzanzeige.
 
 ## 2. Verdrahtung

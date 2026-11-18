@@ -56,16 +56,16 @@ Danach im Dashboard unter Einstellungen `localhost:8081` eintragen.
 | `python3 tools/check-workflow.py` | CI-Workflow vorab prüfen (Action-Versionen, Job-IDs) |
 | `tools/check-all.sh` | **Vollständigkeitsprüfung**: Dateien, Typen, Tests, Firmware, CI in einem Lauf |
 
-Für ein **Model C mit PM3** liegt eine vorbereitete Vorlage bereit:
+Für ein **Model C mit PM2** liegt eine vorbereitete Vorlage bereit:
 
 ```bash
 cd firmware/ruder_sensor
-cp include/config.model-c-pm3.h include/config.h   # dann Passwörter eintragen
+cp include/config.model-c-pm2.h include/config.h   # dann Passwörter eintragen
 ```
 
-Das PM3 bleibt dabei am Gerät und wird nicht angefasst; der Sensor kommt als
+Das PM2 bleibt dabei am Gerät und wird nicht angefasst; der Sensor kommt als
 zweite Quelle an den Rahmen. Details und das Einmessen der Strecke gegen das
-PM3 stehen in [docs/inbetriebnahme.md](docs/inbetriebnahme.md).
+PM2 stehen in [docs/inbetriebnahme.md](docs/inbetriebnahme.md).
 
 ## Was es kann
 

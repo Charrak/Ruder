@@ -1,15 +1,15 @@
 /**
- * Konfiguration für: Concept2 Model C mit PM3, Sensor-Nachrüstung am Schwungrad.
+ * Konfiguration für: Concept2 Model C mit PM2, Sensor-Nachrüstung am Schwungrad.
  *
  * Übernehmen:
- *   cp include/config.model-c-pm3.h include/config.h
+ *   cp include/config.model-c-pm2.h include/config.h
  *   # config.h öffnen und Passwörter eintragen
  *
- * Warum diese Werte für das Model C:
+ * Warum diese Werte für das Model C mit PM2:
  *
- * - Das PM3 bleibt als eigene Anzeige am Gerät und wird NICHT elektrisch
+ * - Das PM2 bleibt als eigene Anzeige am Gerät und wird NICHT elektrisch
  *   angefasst. Der Hall-Sensor kommt als zweiter Aufnehmer an den Rahmen,
- *   der Magnet auf das Schwungrad. Damit ist das PM3 weiter nutzbar, auch
+ *   der Magnet auf das Schwungrad. Damit ist das PM2 weiter nutzbar, auch
  *   wenn der ESP32 aus ist.
  * - Der Rahmen des Model C ist offener als beim Model D: Kette und
  *   Schwungrad laufen frei, der Sensor sitzt mechanisch unruhiger. Die
@@ -21,10 +21,30 @@
  *
  * Streckenkalibrierung: Das Dashboard rechnet mit 2,5 m pro
  * Schwungradumdrehung (Richtwert aus der Community, nicht von Concept2
- * bestätigt). Gegenprobe: eine bekannte Strecke auf dem PM3 fahren und die
+ * bestätigt). Gegenprobe: eine bekannte Strecke auf dem PM2 fahren und die
  * Meter im Dashboard ablesen. Bei Abweichung DISTANCE_PER_REV in
  * src/core/engine.ts nachziehen:
- *   2,5 * (PM3-Meter / Dashboard-Meter)
+ *   2,5 * (PM2-Meter / Dashboard-Meter)
+ *
+ * Was das PM2 anzeigt – und was hier verglichen werden kann:
+ *
+ *   Anzeige                 Vergleich mit dem Dashboard
+ *   Zeit                    identisch
+ *   Schlagzahl (spm)        muss exakt übereinstimmen
+ *   Split /500 m            stimmt bei passendem Drag-Faktor
+ *   Watt                    PM2 zeigt die Leistung des letzten Schlags, das
+ *                           Dashboard den gleitenden Mittelwert – kurz nach
+ *                           dem Anfahren weichen sie deshalb ab
+ *   Strecke (m)             Referenz für DISTANCE_PER_REV
+ *   Kalorien                andere Formel, nicht vergleichbar
+ *
+ * Drag-Faktor: Das PM2 kann ihn anzeigen (READY halten → Display), das
+ * Dashboard kennt ihn nur als Einstellung. Denselben Wert im Dashboard
+ * eintragen – 120 ist ein üblicher Wert für ein sauberes Model C.
+ *
+ * Das PM2 hat keine Datenschnittstelle. Ein Umbau auf PM5 (USB/LogCard)
+ * ist möglich, aber ein anderes Gerät – diese Firmware bleibt beim
+ * Impuls-Weg und braucht kein PM-Upgrade.
  */
 #pragma once
 

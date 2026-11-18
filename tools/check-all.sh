@@ -51,7 +51,7 @@ PFLICHT=(
   "firmware/ruder_sensor/src/main.cpp:Firmware"
   "firmware/ruder_sensor/include/pulse_filter.h:Entprellung"
   "firmware/ruder_sensor/include/config.example.h:Konfigurationsvorlage"
-  "firmware/ruder_sensor/include/config.model-c-pm3.h:Model C mit PM3"
+  "firmware/ruder_sensor/include/config.model-c-pm2.h:Model C mit PM2"
   ".github/workflows/firmware.yml:CI"
   "tools/device-emulator.mjs:Sensor simulieren"
 

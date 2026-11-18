@@ -1,8 +1,8 @@
 /**
  * Flywheel-Impuls-Engine.
  *
- * Ein Ruderergometer mit Magnetaufnehmer (z. B. Concept2 Model C mit PM2/PM3
- * ohne USB, oder ein ESP32-Umbau) liefert nur eines: den Zeitpunkt, an dem
+ * Ein Ruderergometer mit Magnetaufnehmer (Concept2 Model C mit PM2 ohne USB,
+ * mit ESP32-Umbau) liefert nur eines: den Zeitpunkt, an dem
  * ein Magnet am Sensor vorbeikommt. Aus diesen Impulsabständen lässt sich
  * alles Weitere rekonstruieren:
  *
@@ -25,12 +25,12 @@ export const PULSES_PER_REV = 6;
  * Concept2 bestätigt. Wenn die Strecke systematisch daneben liegt, ist das
  * die Stellschraube – nicht der Sensor:
  *
- *   eine bekannte Strecke auf dem PM fahren (z. B. 1000 m laut PM3),
+ *   eine bekannte Strecke auf dem PM fahren (z. B. 1000 m laut PM2),
  *   die Meter im Dashboard ablesen und rechnen:
  *
  *     DISTANCE_PER_REV = 2,5 * (PM-Meter / Dashboard-Meter)
  *
- * Beispiel: PM3 zeigt 1000 m, das Dashboard 980 m
+ * Beispiel: PM2 zeigt 1000 m, das Dashboard 980 m
  *   -> 2,5 * (1000 / 980) = 2,551 m
  *
  * Der Split skaliert mit, die Leistung ebenfalls (sie hängt an ω, nicht an
