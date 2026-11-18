@@ -204,3 +204,29 @@ describe('Start vom Sensor weg', () => {
     controller.dispose();
   });
 });
+
+describe('Gerät und Konfigurationsvorlage', () => {
+  const VORLAGE = join(
+    process.cwd(),
+    'firmware/ruder_sensor/include/config.model-c-pm2.h',
+  );
+
+  it('ist ein Model C mit PM2', () => {
+    // Das Gerät im Studio hat ein PM2 (kein PM3, kein PM5, kein USB).
+    // Die Vorlage ist der Ort, an dem das für die Installation steht.
+    expect(existsSync(VORLAGE)).toBe(true);
+    const vorlage = readFileSync(VORLAGE, 'utf8');
+    expect(vorlage).toMatch(/PM2/);
+    expect(vorlage).not.toMatch(/PM3/);
+    expect(vorlage).toMatch(/Concept2 Model C/);
+  });
+
+  it('beschreibt die Eigenheiten des PM2', () => {
+    const vorlage = readFileSync(VORLAGE, 'utf8');
+    // Watt pro Schlag statt Mittelwert – der häufigste Grund für
+    // "das Dashboard zeigt was anderes".
+    expect(vorlage).toMatch(/letzten Schlag|letzte Schlag/i);
+    // Drag-Faktor lässt sich am PM2 ablesen.
+    expect(vorlage).toMatch(/Drag-Faktor/);
+  });
+});
