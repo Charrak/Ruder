@@ -176,50 +176,84 @@ prüfen, Polarität des Magneten umdrehen, Pull-up kontrollieren.
 
 ## 4. Dashboard aufs Tablet bringen
 
-Das Dashboard ist eine Webseite. Sie muss irgendwo liegen, wo das Tablet sie
-per WLAN erreicht — drei Wege, alle ohne Cloud:
+**Der ESP32 liefert die Anzeige selbst aus.** Am Tablet wird nur eine
+Adresse geöffnet:
 
-| Weg | Adresse am Tablet | Wofür |
-| --- | --- | --- |
-| **Laptop im Studio** | `http://<laptop-ip>:4173` | der schnellste Weg, Laptop bleibt an |
-| **Einmal gebaut, irgendwo ausgeliefert** | `http://<server-ip>` | Dauerbetrieb, z. B. auf dem Studio-NAS |
-| **Auf dem ESP32 selbst** | `http://ruder-sensor.local/` | nur die Diagnoseseite — die volle Anzeige passt nicht in den Flash |
+```
+http://ruder-sensor.local/
+```
 
-**Weg 1 – Laptop im Studio (empfohlen zum Start):**
+Fertig. Kein Laptop, kein Webserver, kein Internet im Studio. Die Seite
+erkennt, dass sie vom Sensor kommt, und verbindet sich von allein mit ihm —
+es muss nichts eingetippt oder eingestellt werden.
+
+Damit das funktioniert, ist das Dashboard beim Bauen der Firmware
+eingebettet (`firmware/ruder_sensor/include/dashboard_assets.h`, erzeugt von
+`tools/embed-dashboard.mjs`, rund 70 kB). Das passiert automatisch:
 
 ```bash
 npm install
-npm run build      # Typprüfung + Build nach dist/
+npm run build          # Typprüfung, Build, und das Einbetten in die Firmware
+```
+
+Danach die Firmware wie in Abschnitt 2 flashen. Wer nur die Firmware baut
+(`pio run`) und `npm run build` nie laufen lässt, bekommt die Diagnoseseite,
+aber keine Anzeige — der Build funktioniert trotzdem.
+
+### Wenn die Anzeige woanders laufen soll
+
+| Weg | Adresse am Tablet | Wofür |
+| --- | --- | --- |
+| **ESP32** (Standard) | `http://ruder-sensor.local/` | Dauerbetrieb im Studio, nichts weiter nötig |
+| **Laptop im Studio** | `http://<laptop-ip>:4173` | Entwicklung, oder wenn der Flash nicht reicht |
+| **Server im Studio** | `http://<server-ip>` | mehrere Geräte, zentrale Pflege |
+
+Für den Laptop-Weg:
+
+```bash
+npm run build
 npm run preview    # liefert dist/ aus, im ganzen WLAN erreichbar
 ```
 
-`npm run preview` zeigt beim Start die Adresse an, z. B.
-`http://192.168.1.20:4173`. Diese Adresse auf dem Tablet eintippen, fertig.
-Der Laptop darf danach nicht in den Ruhezustand (Netzteil anschließen).
+Dann am Tablet die angezeigte Adresse öffnen und unter Zahnrad →
+**Sensor: ESP32 im WLAN** die Adresse `ruder-sensor.local` eintragen. Auf
+diesem Weg muss die Adresse einmal eingetippt werden, weil die Seite nicht
+vom Sensor kommt und ihn deshalb nicht kennt.
 
-**Weg 2 – fester Platz im Netz:** den Inhalt von `dist/` auf einen
-Webserver im Studio kopieren (jeder beliebige Webserver, keine
-Sonderbehandlung nötig — es sind nur statische Dateien). Wichtig: die Seite
-muss über **`http`** ausgeliefert werden, nicht `https`, sonst blockiert der
-Browser die unverschlüsselte Sensor-Verbindung.
+Wichtig für beide Wege: die Seite muss über **`http`** laufen, nicht
+`https`. Der Sensor spricht `ws://`, und ein per `https` geladenes Dashboard
+darf keine unverschlüsselte Verbindung öffnen — Chrome blockiert das.
 
-> Der Sensor läuft bewusst auf `ws://`. Deshalb Dashboard und Sensor im
-> selben Netz über `http` betreiben — oder beides hinter einen Reverse-Proxy
-> mit TLS legen. Gemischt (`https`-Seite, `ws`-Sensor) blockiert Chrome.
+> Der Sensor läuft bewusst ohne TLS: ein Zertifikat auf einem Gerät ohne
+> Internetzugang wäre nicht prüfbar. Deshalb Dashboard und Sensor im selben
+> Netz über `http` — oder beides hinter einen Reverse-Proxy mit TLS legen.
+
+### Diagnose und Anzeige sind getrennte Seiten
+
+| Adresse | Inhalt |
+| --- | --- |
+| `http://ruder-sensor.local/` | die Anzeige für Tablet und Fernseher |
+| `http://ruder-sensor.local/status` | Diagnose: Impulse, Prellen, WLAN-Pegel, freier Speicher |
+
+Die Diagnoseseite bleibt bewusst schlank — sie ist das Werkzeug für die
+Werkbank und funktioniert auch dann, wenn das eingebettete Dashboard fehlt.
 
 ## 5. Dashboard verbinden
 
-Auf dem Studio-Tablet (Chrome oder Edge):
+Beim Weg über den ESP32 ist nichts zu tun: die Seite verbindet sich selbst.
+Zur Kontrolle die Statuspille oben rechts — sie wird grün und zeigt
+„ESP32 im WLAN", darunter WLAN-Pegel, Impulse/s und „Uhr abgeglichen: ja".
 
-1. Dashboard öffnen, Zahnrad → **Sensor: ESP32 im WLAN**.
+Kommt die Seite von woanders (Laptop oder Server), einmalig:
+
+1. Zahnrad → **Sensor: ESP32 im WLAN**.
 2. Adresse eintragen: `ruder-sensor.local` genügt, Port und Protokoll
    ergänzt das Dashboard selbst.
-3. **Verbinden**. Die Statuspille oben rechts wird grün und zeigt den
-   Sensornamen, darunter erscheinen WLAN-Pegel, Impulse/s und
-   „Uhr abgeglichen: ja".
+3. **Verbinden**.
 
 Die Einstellung wird im Browser gespeichert. Nach einem Neustart des
-Tablets verbindet das Dashboard von allein.
+Tablets verbindet das Dashboard von allein — auch dann, wenn die Seite
+inzwischen vom ESP32 kommt.
 
 ## 6. Kiosk-Betrieb einrichten
 
@@ -268,11 +302,19 @@ Pille ist dann rot und die Meldung nennt den Grund.
 
 | Symptom | Ursache | Abhilfe |
 | --- | --- | --- |
+| Seite zeigt nur die Diagnose, keine Anzeige | Dashboard war beim Firmware-Bau nicht eingebettet | `npm run build` laufen lassen (bettet ein) und die Firmware neu bauen/flashen |
+| Anzeige lädt, bleibt aber leer | Firmware ohne eingebettetes Dashboard gebaut | siehe oben — `dashboard_assets.h` muss vorhanden sein |
+| `ruder-sensor.local` wird nicht gefunden | mDNS im Netz blockiert (manche Router, Gäste-WLAN) | IP direkt eintippen, steht auf `http://<IP>/status` |
 | Dashboard verbindet nicht | falsche Adresse | IP auf der Sensordiagnose ablesen und eintragen |
 | `wss://` schlägt fehl | Sensor spricht nur `ws://` | im Dashboard `ws://IP/` verwenden |
 | Seite lädt, aber Werte bleiben null | Kiosk-Seite ist per `https` geladen, Sensor per `ws` | Dashboard und Sensor im selben Netz über `http` betreiben, oder einen Reverse-Proxy mit TLS davor setzen |
 | Schlagzahl zu hoch | Prellen | `DEBOUNCE_US` in `config.h` auf 5000 erhöhen |
 | Split weicht von PM ab | Drag-Faktor falsch | Drag-Faktor im Dashboard auf Wert der Klappenstellung setzen |
+
+**Speicher:** die Anzeige belegt rund 70 kB Flash. Die App-Partition hat
+etwa 1,3 MB, die Firmware braucht rund 580 kB — bleibt reichlich. Wird es
+eng, lässt sich das Dashboard per gzip auf ein Drittel drücken
+(`tools/embed-dashboard.mjs`); das kostet dann RAM beim Ausliefern.
 
 **Bekannte Einschränkung:** Browser verbieten einer `https`-Seite, eine
 unverschlüsselte `ws`-Verbindung zu öffnen. Für den Studiobetrieb heißt

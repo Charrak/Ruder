@@ -26,6 +26,13 @@ class String {
 
   const char *c_str() const { return v.c_str(); }
   size_t length() const { return v.size(); }
+  bool startsWith(const char *prefix) const { return v.rfind(prefix, 0) == 0; }
+  int indexOf(char c) const {
+    const size_t pos = v.find(c);
+    return pos == std::string::npos ? -1 : static_cast<int>(pos);
+  }
+  String substring(size_t from) const { return String(v.substr(from)); }
+  String substring(size_t from, size_t to) const { return String(v.substr(from, to - from)); }
   char operator[](size_t i) const { return v[i]; }
   String &operator+=(const String &o) { v += o.v; return *this; }
   String &operator+=(const char *o) { v += o; return *this; }
@@ -44,6 +51,18 @@ inline String operator+(const String &a, const char *b) { String r(a); r += b; r
 inline String operator+(const char *a, const String &b) { String r(a); r += b; return r; }
 
 #define F(x) (x)
+
+// Flash-Attribute wie auf dem ESP32. Auf dem Rechner ist alles RAM, deshalb
+// sind es leere Huelle – der Syntaxcheck prueft nur die Aufrufstellen.
+#ifndef PROGMEM
+#define PROGMEM
+#endif
+#ifndef PGM_P
+#define PGM_P const char *
+#endif
+#ifndef pgm_read_byte
+#define pgm_read_byte(addr) (*reinterpret_cast<const uint8_t *>(addr))
+#endif
 
 #define INPUT 0
 #define OUTPUT 1
@@ -65,7 +84,10 @@ unsigned long millis();
 void delay(unsigned long ms);
 void delayMicroseconds(unsigned int us);
 void ESP_restart();
-struct EspClass { void restart(); };
+struct EspClass {
+  void restart();
+  uint32_t getFreeHeap() const;
+};
 extern EspClass ESP;
 
 struct SerialStub {

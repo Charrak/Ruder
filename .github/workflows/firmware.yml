@@ -14,17 +14,38 @@ name: Firmware ESP32
 #   ruder-sensor-esp32dev-boot_app0.bin  für 0xe000
 #   flashen.sh / flashen.bat             fertige Befehle mit korrekten Adressen
 
+# Achtung: das Dashboard steckt in der Firmware (src/**, public/brand/web/**).
+# Ändert sich die Anzeige, muss die .bin neu gebaut werden – deshalb stehen
+# diese Pfade mit in der Liste.
 on:
   push:
     branches: [main]
     paths:
       - 'firmware/**'
+      - 'src/**'
+      - 'index.html'
+      - 'public/brand/web/**'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tools/embed-dashboard.mjs'
+      - 'tools/check-embedding.mjs'
+      - 'tools/check-workflow.py'
       - '.github/workflows/firmware.yml'
       - 'tools/check-workflow.py'
     tags: ['v*']
   pull_request:
     paths:
       - 'firmware/**'
+      - 'src/**'
+      - 'index.html'
+      - 'public/brand/web/**'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tools/embed-dashboard.mjs'
+      - 'tools/check-embedding.mjs'
+      - 'tools/check-workflow.py'
       - '.github/workflows/firmware.yml'
       - 'tools/check-workflow.py'
   workflow_dispatch:
@@ -71,6 +92,21 @@ jobs:
         working-directory: firmware
         run: make check-syntax
 
+      # Die Anzeige steckt in der Firmware. Hier wird geprüft, dass das
+      # eingebettete Dashboard zum Build passt und im Flash-Budget bleibt -
+      # ein Fehler an dieser Stelle würde sonst erst am Tablet auffallen.
+      - name: Node bereitstellen
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Dashboard und Einbettung prüfen
+        run: |
+          npm ci
+          npm run build
+          node tools/check-embedding.mjs
+
   # ---------------------------------------------------------------------
   # Der eigentliche Build. Läuft erst, wenn die Vorprüfung grün ist.
   # ---------------------------------------------------------------------
@@ -80,6 +116,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+
+      # Das Dashboard wird in die Firmware eingebettet: danach liefert der
+      # ESP32 die Anzeige selbst aus. Muss vor "Firmware bauen" laufen,
+      # sonst entsteht eine .bin ohne Anzeige (nur Diagnoseseite).
+      - name: Node bereitstellen
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Dashboard bauen und einbetten
+        run: |
+          npm ci
+          npm run build
+          echo "--- eingebettet ---"
+          head -6 firmware/ruder_sensor/include/dashboard_assets.h
+          node tools/check-embedding.mjs
 
       - name: Python bereitstellen
         uses: actions/setup-python@v7

@@ -6,11 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node tools/embed-dashboard.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "emulator": "node tools/device-emulator.mjs --port 8081"
+    "emulator": "node tools/device-emulator.mjs --port 8081",
+    "embed": "node tools/embed-dashboard.mjs",
+    "check:embed": "node tools/embed-dashboard.mjs --pruefen && node tools/check-embedding.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
